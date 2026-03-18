@@ -1,0 +1,95 @@
+services:
+  # PostgreSQL Database
+  postgres-kimi:
+    image: postgres:15-alpine
+    container_name: ent-health-postgres-kimi
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: health_user
+      POSTGRES_PASSWORD: health_password
+      POSTGRES_DB: health_db_kimi
+    ports:
+      - "5437:5432"
+    volumes:
+      - postgres_data_kimi:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U health_user -d health_db_kimi"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - health-network-kimi
+
+  # Redis Cache
+  redis-kimi:
+    image: redis:7-alpine
+    container_name: ent-health-redis-kimi
+    restart: unless-stopped
+    ports:
+      - "6384:6379"
+    volumes:
+      - redis_data_kimi:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - health-network-kimi
+
+  # FastAPI Backend
+  backend-kimi:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ent-health-backend-kimi
+    restart: unless-stopped
+    ports:
+      - "8005:8000"
+    environment:
+      - DATABASE_URL=postgresql://health_user:health_password@postgres-kimi:5432/health_db_kimi
+      - REDIS_URL=redis://redis-kimi:6379/0
+      - SECRET_KEY=your-secret-key-change-in-production-kimi
+      - DEBUG=true
+    volumes:
+      - ./backend/app:/app/app:ro
+      - backend_data_kimi:/app/data
+    depends_on:
+      postgres-kimi:
+        condition: service_healthy
+      redis-kimi:
+        condition: service_healthy
+    networks:
+      - health-network-kimi
+
+  # React Frontend
+  frontend-kimi:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ent-health-frontend-kimi
+    restart: unless-stopped
+    ports:
+      - "3005:3000"
+    environment:
+      - VITE_API_URL=http://localhost:8005
+    volumes:
+      - ./frontend/src:/app/src:ro
+      - ./frontend/public:/app/public:ro
+    depends_on:
+      - backend-kimi
+    networks:
+      - health-network-kimi
+
+volumes:
+  postgres_data_kimi:
+    driver: local
+  redis_data_kimi:
+    driver: local
+  backend_data_kimi:
+    driver: local
+
+networks:
+  health-network-kimi:
+    driver: bridge
