@@ -257,6 +257,29 @@ PUT    /api/enterprises/{id}   - Update enterprise
 DELETE /api/enterprises/{id}   - Delete enterprise
 ```
 
+### AI Configurations (Admin only)
+
+```
+GET    /api/ai-configs              - List AI configurations
+GET    /api/ai-configs/{id}         - Get AI configuration
+POST   /api/ai-configs              - Create AI configuration
+PUT    /api/ai-configs/{id}         - Update AI configuration
+DELETE /api/ai-configs/{id}         - Delete AI configuration
+POST   /api/ai-configs/{id}/activate - Activate AI configuration
+```
+
+### Reports
+
+```
+POST   /api/reports/generate                    - Start report generation
+GET    /api/reports/{task_id}/status            - Get task status
+GET    /api/reports/{task_id}/download          - Download report
+GET    /api/reports                             - List reports
+GET    /api/reports/{report_id}                 - Get report detail
+DELETE /api/reports/{task_id}                   - Cancel/delete task
+GET    /api/reports/enterprises/{id}/summary    - Enterprise report summary
+```
+
 ---
 
 ## Code Style Guidelines
@@ -306,11 +329,11 @@ const LoginPage: React.FC = () => {
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| Phase 0 | Infrastructure setup | ✅ Current |
-| Phase 1 | Core framework (auth, users) | ⏳ Pending |
-| Phase 2 | Enterprise data management | ⏳ Pending |
-| Phase 3 | Indicator calculation engine | ⏳ Pending |
-| Phase 4 | AI report generation | ⏳ Pending |
+| Phase 0 | Infrastructure setup | ✅ Completed |
+| Phase 1 | Core framework (auth, users) | ✅ Completed |
+| Phase 2 | Enterprise data management | ✅ Completed |
+| Phase 3 | Indicator calculation engine | ✅ Completed |
+| Phase 4 | AI report generation | ✅ Completed |
 | Phase 5 | Historical data & optimization | ⏳ Pending |
 
 ---
@@ -325,6 +348,104 @@ See `.env.example` for all available variables:
 - `CORS_ORIGINS` - Allowed CORS origins
 - `LLM_API_BASE_URL` - LLM API endpoint (Phase 4)
 - `LLM_API_KEY` - LLM API key (Phase 4)
+
+---
+
+## AI Configuration Commands
+
+### Manage AI Configurations
+
+```bash
+# List all AI configurations
+curl -X GET http://localhost:8005/api/ai-configs \
+  -H "Authorization: Bearer <token>"
+
+# Create a new AI configuration (admin only)
+curl -X POST http://localhost:8005/api/ai-configs \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "config_name": "DeepSeek-Production",
+    "provider": "deepseek",
+    "api_key": "sk-xxx",
+    "model_name": "deepseek-chat",
+    "is_default": true
+  }'
+
+# Update an AI configuration (admin only)
+curl -X PUT http://localhost:8005/api/ai-configs/1 \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model_name": "deepseek-coder",
+    "temperature": 0.5
+  }'
+
+# Activate an AI configuration (admin only)
+curl -X POST http://localhost:8005/api/ai-configs/1/activate \
+  -H "Authorization: Bearer <token>"
+
+# Delete an AI configuration (admin only)
+curl -X DELETE http://localhost:8005/api/ai-configs/1 \
+  -H "Authorization: Bearer <token>"
+```
+
+### Supported AI Providers
+
+| Provider | Identifier | Notes |
+|----------|------------|-------|
+| OpenAI | `openai` | GPT-4, GPT-3.5 |
+| DeepSeek | `deepseek` | OpenAI-compatible |
+| Qwen | `qwen` | Alibaba, OpenAI-compatible |
+| Kimi | `kimi` | Moonshot AI |
+| MiniMax | `minimax` | OpenAI-compatible |
+| Gemini | `gemini` | Google AI |
+| GLM | `glm` | ZhipuAI |
+| OpenAI-Compatible | `openai-compatible` | Custom endpoints |
+
+---
+
+## Report Generation Commands
+
+### Generate and Manage Reports
+
+```bash
+# Start report generation
+curl -X POST http://localhost:8005/api/reports/generate \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "enterprise_id": 1,
+    "report_type": "full_diagnosis",
+    "report_years": "2021-2023",
+    "include_peer_comparison": true,
+    "peer_count": 5
+  }'
+
+# Check task status
+curl -X GET http://localhost:8005/api/reports/{task_id}/status \
+  -H "Authorization: Bearer <token>"
+
+# Download completed report
+curl -X GET http://localhost:8005/api/reports/{task_id}/download \
+  -H "Authorization: Bearer <token>" \
+  -o report.docx
+
+# List all reports
+curl -X GET "http://localhost:8005/api/reports?page=1&page_size=20" \
+  -H "Authorization: Bearer <token>"
+
+# Cancel running task
+curl -X DELETE http://localhost:8005/api/reports/{task_id} \
+  -H "Authorization: Bearer <token>"
+```
+
+### Report Types
+
+- `full_diagnosis` - Complete health diagnosis report
+- `quick_diagnosis` - Quick diagnostic summary
+- `financial_analysis` - Financial metrics analysis
+- `risk_assessment` - Risk identification and evaluation
 
 ---
 
@@ -360,6 +481,55 @@ docker-compose exec postgres-kimi pg_isready -U health_user
 # Clear node_modules and reinstall
 docker-compose exec frontend-kimi sh -c "rm -rf node_modules && npm install"
 ```
+
+### AI configuration issues
+
+```bash
+# Check if AI configs exist in database
+docker-compose exec postgres-kimi psql -U health_user -d health_db_kimi \
+  -c "SELECT id, config_name, provider, is_active, is_default FROM ai_configs;"
+
+# Check if an AI config is active
+docker-compose exec postgres-kimi psql -U health_user -d health_db_kimi \
+  -c "SELECT * FROM ai_configs WHERE is_active = true;"
+
+# View AI config audit logs
+docker-compose exec postgres-kimi psql -U health_user -d health_db_kimi \
+  -c "SELECT * FROM ai_config_audit_logs ORDER BY created_at DESC LIMIT 10;"
+```
+
+### Report generation issues
+
+```bash
+# Check report task status in database
+docker-compose exec postgres-kimi psql -U health_user -d health_db_kimi \
+  -c "SELECT id, task_id, status, error_message FROM generated_reports ORDER BY created_at DESC LIMIT 5;"
+
+# View backend logs for report errors
+docker-compose logs backend-kimi | grep -i "report\|llm\|error"
+
+# Check Redis for task queue status
+docker-compose exec redis-kimi redis-cli KEYS "report:*"
+```
+
+### LLM API connection issues
+
+1. **API Key 验证失败**
+   - 确认 API Key 格式正确（通常以 `sk-` 开头）
+   - 检查 API Key 是否有效且未过期
+   - 确认账户余额充足
+
+2. **网络连接超时**
+   - 检查服务器网络是否可访问 LLM API 地址
+   - 如在国内使用 OpenAI，可能需要配置代理或使用 OpenAI-Compatible 提供商
+
+3. **模型不存在错误**
+   - 确认模型名称正确（如 `gpt-4`、`deepseek-chat`）
+   - 不同提供商支持的模型名称不同
+
+4. **配置未激活**
+   - 创建配置后需要点击「激活」按钮
+   - 同一时间只能有一个活跃配置
 
 ---
 

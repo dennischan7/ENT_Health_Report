@@ -13,6 +13,7 @@
 - 🏢 **企业详情展示**：展示企业基本信息、注册信息、联系方式、经营信息
 - ✏️ **企业数据编辑**：支持所有字段的编辑、暂存、保存
 - 🔐 **权限控制**：管理员和普通用户的权限分离
+- 🤖 **AI 智能分析**：支持多种大模型提供商，自动生成企业健康度诊断报告
 
 ## 技术栈
 
@@ -173,6 +174,87 @@ POST /api/financials/batch-refresh/stop    - 停止批量更新
 POST /api/financials/export                - 批量导出Excel
 ```
 
+### AI 配置管理（管理员）
+
+```
+GET    /api/ai-configs              - AI 配置列表
+GET    /api/ai-configs/{id}         - 配置详情
+POST   /api/ai-configs              - 创建配置（需管理员权限）
+PUT    /api/ai-configs/{id}         - 更新配置（需管理员权限）
+DELETE /api/ai-configs/{id}         - 删除配置（需管理员权限）
+POST   /api/ai-configs/{id}/activate - 激活配置
+```
+
+### 报告生成
+
+```
+POST   /api/reports/generate                    - 启动报告生成
+GET    /api/reports/{task_id}/status            - 查询任务状态
+GET    /api/reports/{task_id}/download          - 下载报告
+GET    /api/reports                             - 报告列表
+GET    /api/reports/{report_id}                 - 报告详情
+DELETE /api/reports/{task_id}                   - 取消/删除任务
+GET    /api/reports/enterprises/{id}/summary    - 企业报告摘要
+```
+
+## AI 智能分析
+
+### 支持的 AI 提供商
+
+平台支持以下 8 种大模型提供商：
+
+| 提供商 | 标识符 | 默认 API 地址 | 说明 |
+|--------|--------|---------------|------|
+| OpenAI | `openai` | https://api.openai.com/v1 | GPT-4、GPT-3.5 等 |
+| DeepSeek | `deepseek` | https://api.deepseek.com/v1 | DeepSeek Chat、Coder 等 |
+| 通义千问 | `qwen` | https://dashscope.aliyuncs.com/compatible-mode/v1 | 阿里云 Qwen 系列 |
+| Kimi | `kimi` | https://api.moonshot.cn/v1 | Moonshot AI |
+| MiniMax | `minimax` | https://api.minimax.chat/v1 | MiniMax 模型 |
+| Gemini | `gemini` | Google AI API | Google Gemini 系列 |
+| 智谱 GLM | `glm` | https://open.bigmodel.cn/api/paas/v4 | ChatGLM 系列 |
+| OpenAI 兼容 | `openai-compatible` | 自定义 | 任何兼容 OpenAI API 的服务 |
+
+### 配置 AI 提供商
+
+1. 管理员登录系统
+2. 进入「系统设置」→「AI 配置」
+3. 添加新配置：
+   - 配置名称：如 "DeepSeek-生产"
+   - 选择提供商：deepseek
+   - 输入 API Key
+   - 选择模型：如 deepseek-chat
+   - 设置默认配置
+4. 点击「激活」启用配置
+
+### 生成企业健康报告
+
+```bash
+# 通过 API 生成报告
+curl -X POST http://localhost:8005/api/reports/generate \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "enterprise_id": 1,
+    "report_type": "full_diagnosis",
+    "report_years": "2021-2023",
+    "include_peer_comparison": true,
+    "peer_count": 5
+  }'
+
+# 查询报告生成状态
+curl http://localhost:8005/api/reports/{task_id}/status \
+  -H "Authorization: Bearer <token>"
+```
+
+### 报告类型
+
+| 类型 | 标识符 | 说明 |
+|------|--------|------|
+| 完整诊断报告 | `full_diagnosis` | 包含财务分析、风险评估、健康度评分 |
+| 快速诊断报告 | `quick_diagnosis` | 核心指标分析，适合快速了解企业状况 |
+| 财务分析报告 | `financial_analysis` | 专注财务指标分析 |
+| 风险评估报告 | `risk_assessment` | 侧重风险识别与评估 |
+
 ## 数据统计
 
 ### 企业数据
@@ -199,11 +281,18 @@ POST /api/financials/export                - 批量导出Excel
 | Phase 0 | 基础设施搭建 | ✅ 已完成 |
 | Phase 1 | 核心框架开发 | ✅ 已完成 |
 | Phase 2 | 企业数据管理 | ✅ 已完成 |
-| Phase 3 | 指标计算引擎 | ⏳ 待开发 |
-| Phase 4 | AI 报告生成 | ⏳ 待开发 |
+| Phase 3 | 指标计算引擎 | ✅ 已完成 |
+| Phase 4 | AI 报告生成 | ✅ 已完成 |
 | Phase 5 | 历史数据与优化 | ⏳ 待开发 |
 
 ## 最近更新
+
+### v3.0 (2026-03-20)
+
+- 🤖 **AI 智能分析**：集成 8 种大模型提供商，支持企业健康度诊断报告自动生成
+- 🔧 AI 配置管理：支持多配置、配置切换、审计日志
+- 📊 报告生成 API：异步任务、进度追踪、报告下载
+- 🔐 API Key 加密存储，敏感信息安全保护
 
 ### v2.3 (2026-03-20)
 
