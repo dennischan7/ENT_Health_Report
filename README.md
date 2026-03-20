@@ -167,6 +167,10 @@ GET /api/financials/enterprises/{id}       - 企业财务详情
 GET /api/financials/stats                  - 全局统计
 GET /api/financials/enterprises/{id}/status - 数据状态
 POST /api/financials/enterprises/{id}/refresh - 更新财务数据
+GET /api/financials/batch-refresh/status   - 批量更新状态
+POST /api/financials/batch-refresh/start   - 启动批量更新
+POST /api/financials/batch-refresh/stop    - 停止批量更新
+POST /api/financials/export                - 批量导出Excel
 ```
 
 ## 数据统计
@@ -200,6 +204,12 @@ POST /api/financials/enterprises/{id}/refresh - 更新财务数据
 | Phase 5 | 历史数据与优化 | ⏳ 待开发 |
 
 ## 最近更新
+
+### v2.3 (2026-03-20)
+
+- ✨ 一键批量更新：后台更新所有企业财务数据，实时进度显示
+- 📊 批量导出 Excel：多选企业、选择年份、导出三大报表
+- 🛠️ 新增批量更新状态 API、停止更新 API、导出 API
 
 ### v2.2 (2026-03-20)
 
