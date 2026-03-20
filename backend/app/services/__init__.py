@@ -13,6 +13,13 @@ from app.services.data_cleaner import (
     INCOME_STATEMENT_MAPPING,
     CASHFLOW_STATEMENT_MAPPING,
 )
+from app.services.llm_service import (
+    LLMClient,
+    LLMError,
+    LLMConfigNotFoundError,
+    LLMGenerationError,
+    get_llm_client,
+)
 from app.services.task_manager import TaskManager, TaskStatus
 
 __all__ = [
@@ -20,6 +27,11 @@ __all__ = [
     "BatchImportService",
     "TaskManager",
     "TaskStatus",
+    "LLMClient",
+    "LLMError",
+    "LLMConfigNotFoundError",
+    "LLMGenerationError",
+    "get_llm_client",
     "transform_balance_sheet",
     "transform_income_statement",
     "transform_cashflow_statement",

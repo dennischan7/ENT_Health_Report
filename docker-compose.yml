@@ -51,6 +51,7 @@ services:
       - DATABASE_URL=postgresql://health_user:health_password@postgres-kimi:5432/health_db_kimi
       - REDIS_URL=redis://redis-kimi:6379/0
       - SECRET_KEY=your-secret-key-change-in-production-kimi
+      - ENCRYPTION_KEY=v5zJlAQdMji7huo6B-p_Qv8lYQO6GFRGfSur9NMwh-U=
       - DEBUG=true
     volumes:
       - ./backend/app:/app/app:ro
