@@ -164,6 +164,7 @@ class GeneratedReportResponse(BaseModel):
 
     id: int
     enterprise_id: int
+    task_id: Optional[str] = Field(None, description="任务ID")
     report_type: ReportType
     report_title: str
     report_years: Optional[str]

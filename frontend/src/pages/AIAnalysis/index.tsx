@@ -38,20 +38,8 @@ interface EnterpriseSearchResult {
 }
 
 // Report task with enterprise name (from API)
-interface ReportTaskWithEnterprise {
-  task_id: string
-  enterprise_id?: number
-  enterprise_code?: string
-  enterprise_name?: string
-  report_type?: string
-  status: string
-  progress?: number
-  message?: string
-  error_message?: string
-  result_url?: string
-  created_at?: string
-  updated_at?: string
-  report_id?: number
+interface ReportTaskWithEnterprise extends ReportTask {
+  // Additional fields from list API
 }
 
 // Task status configuration
@@ -252,22 +240,22 @@ function AIAnalysisPage() {
   }
 
   // Download report
-  const handleDownload = async (task: ReportTaskWithEnterprise) => {
-    if (!task.task_id) {
+  const handleDownload = async (record: ReportTaskWithEnterprise) => {
+    if (!record.task_id) {
       message.error('任务ID不存在')
       return
     }
     try {
-      const response = await apiClient.get(`/api/reports/${task.task_id}/download`, { responseType: 'blob' })
+      const response = await apiClient.get(`/api/reports/${record.task_id}/download`, { responseType: 'blob' })
       const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
       const url = window.URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = `health_report_${task.enterprise_code || 'enterprise'}_${task.task_id}.docx`
+      link.download = `health_report_${record.enterprise_code || record.id}_${record.task_id}.docx`
       link.click()
       window.URL.revokeObjectURL(url)
-    } catch (error) {
-      message.error('下载报告失败')
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || '下载报告失败')
     }
   }
 

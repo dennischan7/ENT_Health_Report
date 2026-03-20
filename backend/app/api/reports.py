@@ -329,8 +329,13 @@ def download_report(
     Download a generated report file.
     下载已生成的报告文件。
     """
-    # Find report by task_id
-    report = db.query(GeneratedReport).filter(GeneratedReport.task_id == task_id).first()
+    # Find report by task_id (prefer completed reports)
+    report = (
+        db.query(GeneratedReport)
+        .filter(GeneratedReport.task_id == task_id)
+        .order_by(GeneratedReport.id.desc())
+        .first()
+    )
 
     if not report:
         raise HTTPException(

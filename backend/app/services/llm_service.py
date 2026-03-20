@@ -388,9 +388,7 @@ class LLMClient:
         # Providers known to support native structured output
         STRUCTURED_OUTPUT_PROVIDERS = {
             AIProvider.OPENAI,
-            AIProvider.ANTHROPIC,
             "openai",
-            "anthropic",
         }
 
         provider_str = provider.value if hasattr(provider, "value") else str(provider)
@@ -602,13 +600,51 @@ class LLMClient:
                 max_tokens=max_tokens if max_tokens is not None else config.max_tokens,
             )
 
-        structured_model = chat_model.with_structured_output(schema)
         converted_messages = self._convert_messages(messages)
 
-        def _invoke() -> T:
-            return structured_model.invoke(converted_messages)
+        # Check if provider supports structured output
+        STRUCTURED_OUTPUT_PROVIDERS = {AIProvider.OPENAI, "openai"}
+        provider_str = (
+            config.provider.value if hasattr(config.provider, "value") else str(config.provider)
+        )
 
-        return self._retry_with_backoff(_invoke)
+        if provider_str.lower() in [
+            p.value if hasattr(p, "value") else str(p).lower() for p in STRUCTURED_OUTPUT_PROVIDERS
+        ]:
+            # Use native structured output
+            structured_model = chat_model.with_structured_output(schema)
+
+            def _invoke() -> T:
+                return structured_model.invoke(converted_messages)
+
+            return self._retry_with_backoff(_invoke)
+        else:
+            # Use JSON mode for providers that don't support structured output
+            import json
+
+            schema_json = schema.model_json_schema()
+            json_instruction = f"\n\nIMPORTANT: You must respond with a valid JSON object that matches this schema:\n{json.dumps(schema_json, indent=2)}\n\nRespond ONLY with the JSON object, no other text."
+
+            enhanced_messages = list(converted_messages)
+            enhanced_messages.append(SystemMessage(content=json_instruction))
+
+            def _invoke_json() -> T:
+                response = chat_model.invoke(enhanced_messages)
+                content = response.content
+
+                if "```json" in content:
+                    start = content.find("```json") + 7
+                    end = content.find("```", start)
+                    content = content[start:end].strip()
+                elif "```" in content:
+                    start = content.find("```") + 3
+                    end = content.find("```", start)
+                    content = content[start:end].strip()
+
+                data = json.loads(content)
+                return schema.model_validate(data)
+
+            return self._retry_with_backoff(_invoke_json)
 
 
 # Convenience function for quick usage

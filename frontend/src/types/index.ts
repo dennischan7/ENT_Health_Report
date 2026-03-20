@@ -292,20 +292,23 @@ export interface AIConfigListResponse {
 // Report Task
 export enum ReportStatus {
   PENDING = 'pending',
-  PROCESSING = 'processing',
+  GENERATING = 'generating',
   COMPLETED = 'completed',
   FAILED = 'failed',
 }
 
 export interface ReportTask {
   id: number
+  task_id: string
   enterprise_id: number
   enterprise_name?: string
+  enterprise_code?: string
   report_type: string
+  report_title: string
   status: ReportStatus
-  progress: number
   error_message?: string
-  result_url?: string
+  file_path?: string
+  file_size?: number
   created_by: number
   created_at: string
   updated_at: string
