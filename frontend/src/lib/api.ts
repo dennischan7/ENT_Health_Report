@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from 'axios'
 import { message } from 'antd'
 

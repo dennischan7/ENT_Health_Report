@@ -30,6 +30,7 @@ class EnterpriseCreate(EnterpriseBase):
 class EnterpriseUpdate(BaseModel):
     """Schema for updating an enterprise."""
 
+    # Basic fields
     category_name: Optional[str] = Field(None, min_length=1, max_length=100, description="门类名称")
     industry_code: Optional[str] = Field(
         None, min_length=1, max_length=10, description="行业大类代码"
@@ -43,6 +44,22 @@ class EnterpriseUpdate(BaseModel):
     company_name: Optional[str] = Field(
         None, min_length=1, max_length=100, description="上市公司简称"
     )
+
+    # Extended fields
+    english_name: Optional[str] = Field(None, max_length=200, description="英文名称")
+    legal_representative: Optional[str] = Field(None, max_length=50, description="法人代表")
+    registered_capital: Optional[Decimal] = Field(None, description="注册资金(万元)")
+    establish_date: Optional[date] = Field(None, description="成立日期")
+    listing_date: Optional[date] = Field(None, description="上市日期")
+    website: Optional[str] = Field(None, max_length=200, description="官方网站")
+    email: Optional[str] = Field(None, max_length=100, description="电子邮箱")
+    phone: Optional[str] = Field(None, max_length=200, description="联系电话")
+    fax: Optional[str] = Field(None, max_length=200, description="传真")
+    registered_address: Optional[str] = Field(None, max_length=500, description="注册地址")
+    office_address: Optional[str] = Field(None, max_length=500, description="办公地址")
+    main_business: Optional[str] = Field(None, description="主营业务")
+    business_scope: Optional[str] = Field(None, description="经营范围")
+    company_profile: Optional[str] = Field(None, description="机构简介")
 
 
 # Schema for enterprise response

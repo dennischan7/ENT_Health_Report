@@ -192,8 +192,16 @@ def delete_enterprise(
     current_user: User = Depends(get_current_user),
 ) -> None:
     """
-    Delete an enterprise.
+    Delete an enterprise. Only admins can delete enterprises.
+    删除企业。仅管理员可删除企业。
     """
+    # Check admin permission
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="只有管理员才能删除企业",
+        )
+
     enterprise = db.query(Enterprise).filter(Enterprise.id == enterprise_id).first()
     if not enterprise:
         raise HTTPException(
