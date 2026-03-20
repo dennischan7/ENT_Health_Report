@@ -41,6 +41,21 @@ from app.schemas.ai_config import (
     AIConfigResponse,
     AIConfigListResponse,
 )
+from app.schemas.report import (
+    ReportData,
+    ReportGenerateRequest,
+    GeneratedReportResponse,
+    GeneratedReportListResponse,
+    FinancialMetric,
+    YearlyMetric,
+    TrendData,
+    ExecutiveSummary,
+    FinancialMetricsSection,
+    ChartData,
+    PeerComparisonSection,
+    RiskAssessmentSection,
+    RecommendationsSection,
+)
 
 __all__ = [
     # User schemas
@@ -78,4 +93,18 @@ __all__ = [
     "AIConfigUpdate",
     "AIConfigResponse",
     "AIConfigListResponse",
+    # Report schemas
+    "ReportData",
+    "ReportGenerateRequest",
+    "GeneratedReportResponse",
+    "GeneratedReportListResponse",
+    "FinancialMetric",
+    "YearlyMetric",
+    "TrendData",
+    "ExecutiveSummary",
+    "FinancialMetricsSection",
+    "ChartData",
+    "PeerComparisonSection",
+    "RiskAssessmentSection",
+    "RecommendationsSection",
 ]
