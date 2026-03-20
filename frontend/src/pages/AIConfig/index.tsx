@@ -129,7 +129,7 @@ function AIConfigPage() {
   const handleActivate = async (id: number) => {
     setActivatingId(id)
     try {
-      await apiClient.put(`/api/ai-configs/${id}/activate`)
+      await apiClient.post(`/api/ai-configs/${id}/activate`)
       message.success('激活成功')
       fetchConfigs()
     } catch (error: any) {
