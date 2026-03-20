@@ -9,6 +9,8 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   DollarOutlined,
+  RobotOutlined,
+  SettingOutlined,
 } from '@ant-design/icons'
 
 const { Header, Sider, Content } = Layout
@@ -16,9 +18,10 @@ const { Text } = Typography
 
 interface MenuItem {
   key: string
-  icon: React.ReactNode
+  icon?: React.ReactNode
   label: string
-  path: string
+  path?: string
+  children?: MenuItem[]
 }
 
 const menuItems: MenuItem[] = [
@@ -26,6 +29,15 @@ const menuItems: MenuItem[] = [
   { key: 'enterprises', icon: <TeamOutlined />, label: '企业管理', path: '/enterprises' },
   { key: 'financials', icon: <DollarOutlined />, label: '财务数据', path: '/financials' },
   { key: 'users', icon: <UserOutlined />, label: '用户管理', path: '/users' },
+  {
+    key: 'ai-analysis',
+    icon: <RobotOutlined />,
+    label: 'AI分析',
+    children: [
+      { key: 'ai-config', icon: <SettingOutlined />, label: 'AI配置管理', path: '/ai-config' },
+      { key: 'peer-comparison', label: '同行对比分析', path: '/ai-analysis' },
+    ],
+  },
 ]
 
 function MainLayout() {
@@ -42,9 +54,21 @@ function MainLayout() {
   }, [])
 
   const handleMenuClick = (key: string) => {
-    const item = menuItems.find(m => m.key === key)
-    if (item) {
-      navigate(item.path)
+    // First check flat items
+    const flatItem = menuItems.find(m => m.key === key && m.path)
+    if (flatItem && flatItem.path) {
+      navigate(flatItem.path)
+      return
+    }
+    // Then check submenu items
+    for (const item of menuItems) {
+      if (item.children) {
+        const childItem = item.children.find(c => c.key === key && c.path)
+        if (childItem && childItem.path) {
+          navigate(childItem.path)
+          return
+        }
+      }
     }
   }
 
@@ -81,7 +105,81 @@ function MainLayout() {
     </Dropdown>
   )
 
-  const currentKey = menuItems.find(m => location.pathname.startsWith(m.path))?.key || 'dashboard'
+  // Find the current selected key and open parent submenu
+  const findCurrentKey = (): string => {
+    // Check flat items first
+    for (const item of menuItems) {
+      if (item.path && location.pathname.startsWith(item.path)) {
+        return item.key
+      }
+    }
+    // Check submenu children
+    for (const item of menuItems) {
+      if (item.children) {
+        for (const child of item.children) {
+          if (child.path && location.pathname.startsWith(child.path)) {
+            return child.key
+          }
+        }
+      }
+    }
+    return 'dashboard'
+  }
+
+  // Find the parent key to open submenu
+  const findOpenKey = (key: string): string | undefined => {
+    for (const item of menuItems) {
+      if (item.children) {
+        const found = item.children.find(c => c.key === key)
+        if (found) {
+          return item.key
+        }
+      }
+    }
+    return undefined
+  }
+
+  // Calculate current key and open key (must be before useState/useEffect that use them)
+  const currentKey = findCurrentKey()
+  const openKey = findOpenKey(currentKey)
+
+  const [openKeys, setOpenKeys] = useState<string[]>([])
+
+  // Auto-open submenu on initial load if child is selected
+  useEffect(() => {
+    if (openKey && !openKeys.includes(openKey)) {
+      setOpenKeys([openKey])
+    }
+  }, [openKey])
+
+  const handleOpenChange = (keys: string[]) => {
+    setOpenKeys(keys)
+  }
+
+  // Convert menu items to Ant Design menu format
+  const getAntdMenuItems = (items: MenuItem[]): any[] => {
+    return items.map(item => {
+      if (item.children) {
+        return {
+          key: item.key,
+          icon: item.icon,
+          label: item.label,
+          children: item.children.map(child => ({
+            key: child.key,
+            icon: child.icon,
+            label: child.label,
+            onClick: () => handleMenuClick(child.key),
+          })),
+        }
+      }
+      return {
+        key: item.key,
+        icon: item.icon,
+        label: item.label,
+        onClick: () => handleMenuClick(item.key),
+      }
+    })
+  }
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -103,12 +201,9 @@ function MainLayout() {
           theme="dark"
           mode="inline"
           selectedKeys={[currentKey]}
-          items={menuItems.map(item => ({
-            key: item.key,
-            icon: item.icon,
-            label: item.label,
-            onClick: () => handleMenuClick(item.key),
-          }))}
+          openKeys={openKeys}
+          onOpenChange={handleOpenChange}
+          items={getAntdMenuItems(menuItems)}
         />
       </Sider>
       <Layout>

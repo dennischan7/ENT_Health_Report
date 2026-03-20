@@ -248,3 +248,85 @@ export interface EnterpriseDetail extends Enterprise {
   business_scope?: string
   company_profile?: string
 }
+
+// ==================== AI Analysis Types ====================
+
+// AI Configuration
+export interface AIConfig {
+  id: number
+  name: string
+  provider: string
+  model: string
+  api_base_url: string
+  api_key: string // Masked in responses
+  temperature: number
+  max_tokens: number
+  is_default: boolean
+  is_active: boolean
+  created_by: number
+  created_at: string
+  updated_at: string
+}
+
+export interface AIConfigCreate {
+  name: string
+  provider: string
+  model: string
+  api_base_url: string
+  api_key: string
+  temperature?: number
+  max_tokens?: number
+  is_default?: boolean
+  is_active?: boolean
+}
+
+export interface AIConfigUpdate {
+  name?: string
+  provider?: string
+  model?: string
+  api_base_url?: string
+  api_key?: string
+  temperature?: number
+  max_tokens?: number
+  is_default?: boolean
+  is_active?: boolean
+}
+
+export interface AIConfigListResponse {
+  items: AIConfig[]
+  total: number
+}
+
+// Report Task
+export enum ReportStatus {
+  PENDING = 'pending',
+  PROCESSING = 'processing',
+  COMPLETED = 'completed',
+  FAILED = 'failed',
+}
+
+export interface ReportTask {
+  id: number
+  enterprise_id: number
+  enterprise_name?: string
+  report_type: string
+  status: ReportStatus
+  progress: number
+  error_message?: string
+  result_url?: string
+  created_by: number
+  created_at: string
+  updated_at: string
+  completed_at?: string
+}
+
+export interface ReportTaskCreate {
+  enterprise_id: number
+  report_type: string
+  config_id?: number
+}
+
+export interface ReportTaskListResponse {
+  items: ReportTask[]
+  total: number
+}

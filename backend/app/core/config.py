@@ -15,9 +15,7 @@ class Settings(BaseSettings):
     DEBUG: bool = False
 
     # Database
-    DATABASE_URL: str = (
-        "postgresql://health_user:health_password@postgres-kimi:5432/health_db_kimi"
-    )
+    DATABASE_URL: str = "postgresql://health_user:health_password@postgres-kimi:5432/health_db_kimi"
 
     # Redis
     REDIS_URL: str = "redis://redis-kimi:6379/0"
@@ -35,6 +33,9 @@ class Settings(BaseSettings):
     LLM_API_BASE_URL: Optional[str] = None
     LLM_API_KEY: Optional[str] = None
     LLM_MODEL_NAME: str = "gpt-4"
+
+    # Encryption
+    ENCRYPTION_KEY: str = "your-encryption-key-change-in-production"  # Fernet key
 
     class Config:
         env_file = ".env"

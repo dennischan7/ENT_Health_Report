@@ -33,6 +33,14 @@ from app.schemas.financial import (
     EnterpriseFinancialSummaryList,
     EnterpriseFinancialDetail,
 )
+from app.schemas.ai_config import (
+    AIProvider,
+    AIConfigBase,
+    AIConfigCreate,
+    AIConfigUpdate,
+    AIConfigResponse,
+    AIConfigListResponse,
+)
 
 __all__ = [
     # User schemas
@@ -63,4 +71,11 @@ __all__ = [
     "EnterpriseFinancialSummary",
     "EnterpriseFinancialSummaryList",
     "EnterpriseFinancialDetail",
+    # AI Config schemas
+    "AIProvider",
+    "AIConfigBase",
+    "AIConfigCreate",
+    "AIConfigUpdate",
+    "AIConfigResponse",
+    "AIConfigListResponse",
 ]
