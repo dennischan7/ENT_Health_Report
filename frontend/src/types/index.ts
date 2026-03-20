@@ -254,42 +254,34 @@ export interface EnterpriseDetail extends Enterprise {
 // AI Configuration
 export interface AIConfig {
   id: number
-  name: string
+  config_name: string
   provider: string
-  model: string
-  api_base_url: string
-  api_key: string // Masked in responses
-  temperature: number
-  max_tokens: number
-  is_default: boolean
+  model_name: string
+  api_key_set: boolean
   is_active: boolean
-  created_by: number
+  is_default: boolean
+  description?: string
+  created_by?: number
   created_at: string
   updated_at: string
 }
 
 export interface AIConfigCreate {
-  name: string
+  config_name: string
   provider: string
-  model: string
-  api_base_url: string
+  model_name: string
   api_key: string
-  temperature?: number
-  max_tokens?: number
+  description?: string
   is_default?: boolean
-  is_active?: boolean
 }
 
 export interface AIConfigUpdate {
-  name?: string
+  config_name?: string
   provider?: string
-  model?: string
-  api_base_url?: string
+  model_name?: string
   api_key?: string
-  temperature?: number
-  max_tokens?: number
+  description?: string
   is_default?: boolean
-  is_active?: boolean
 }
 
 export interface AIConfigListResponse {

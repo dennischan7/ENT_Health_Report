@@ -26,34 +26,37 @@ import type { AIConfig, AIConfigCreate, AIConfigUpdate } from '@/types'
 const { Option } = Select
 const { Password } = Input
 
-// Provider options
+// Provider options - match backend AIProvider enum
 const PROVIDERS = [
-  { value: 'openai', label: 'OpenAI' },
   { value: 'deepseek', label: 'DeepSeek' },
+  { value: 'openai', label: 'OpenAI' },
   { value: 'anthropic', label: 'Anthropic' },
-  { value: 'azure', label: 'Azure OpenAI' },
-  { value: 'custom', label: 'Custom' },
+  { value: 'moonshot', label: 'Moonshot (Kimi)' },
+  { value: 'zhipu', label: '智谱 (GLM)' },
+  { value: 'baidu', label: '百度' },
+  { value: 'alibaba', label: '阿里 (通义千问)' },
+  { value: 'tencent', label: '腾讯' },
 ]
 
 // Common models per provider
 const PROVIDER_MODELS: Record<string, string[]> = {
-  openai: ['gpt-4o', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'],
   deepseek: ['deepseek-chat', 'deepseek-coder'],
+  openai: ['gpt-4o', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'],
   anthropic: ['claude-3-opus', 'claude-3-sonnet', 'claude-3-haiku'],
-  azure: ['gpt-4o', 'gpt-4-turbo', 'gpt-35-turbo'],
-  custom: [],
+  moonshot: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'],
+  zhipu: ['glm-4', 'glm-3-turbo'],
+  baidu: ['ERNIE-Bot-4', 'ERNIE-Bot'],
+  alibaba: ['qwen-turbo', 'qwen-plus', 'qwen-max'],
+  tencent: ['hunyuan-lite', 'hunyuan-standard'],
 }
 
 interface AIConfigFormData {
-  name: string
+  config_name: string
   provider: string
-  api_base_url: string
+  model_name: string
   api_key: string
-  model: string
-  temperature: number
-  max_tokens: number
+  description?: string
   is_default?: boolean
-  is_active?: boolean
 }
 
 function AIConfigPage() {
@@ -90,9 +93,7 @@ function AIConfigPage() {
     form.resetFields()
     // Set default values
     form.setFieldsValue({
-      temperature: 0.7,
-      max_tokens: 4096,
-      is_active: true,
+      is_default: false,
     })
     setModalVisible(true)
   }
@@ -101,15 +102,12 @@ function AIConfigPage() {
   const handleEdit = (record: AIConfig) => {
     setEditingConfig(record)
     form.setFieldsValue({
-      name: record.name,
+      config_name: record.config_name,
       provider: record.provider,
-      api_base_url: record.api_base_url,
+      model_name: record.model_name,
       api_key: '', // Don't show existing key
-      model: record.model,
-      temperature: record.temperature,
-      max_tokens: record.max_tokens,
+      description: record.description,
       is_default: record.is_default,
-      is_active: record.is_active,
     })
     setModalVisible(true)
   }
@@ -158,15 +156,12 @@ function AIConfigPage() {
           return
         }
         const createData: AIConfigCreate = {
-          name: values.name,
+          config_name: values.config_name,
           provider: values.provider,
-          model: values.model,
-          api_base_url: values.api_base_url,
+          model_name: values.model_name,
           api_key: values.api_key,
-          temperature: values.temperature,
-          max_tokens: values.max_tokens,
+          description: values.description,
           is_default: values.is_default,
-          is_active: values.is_active,
         }
         await apiClient.post('/api/ai-configs', createData)
         message.success('创建成功')
@@ -197,8 +192,8 @@ function AIConfigPage() {
   const columns: ColumnsType<AIConfig> = [
     {
       title: '配置名称',
-      dataIndex: 'name',
-      key: 'name',
+      dataIndex: 'config_name',
+      key: 'config_name',
       width: 150,
     },
     {
@@ -212,19 +207,19 @@ function AIConfigPage() {
     },
     {
       title: '模型',
-      dataIndex: 'model',
-      key: 'model',
+      dataIndex: 'model_name',
+      key: 'model_name',
       width: 150,
     },
     {
       title: 'API Key',
-      dataIndex: 'api_key',
-      key: 'api_key',
-      width: 200,
-      render: (key) => (
-        <span style={{ fontFamily: 'monospace', color: '#666' }}>
-          {maskApiKey(key)}
-        </span>
+      dataIndex: 'api_key_set',
+      key: 'api_key_set',
+      width: 120,
+      render: (set) => (
+        <Tag color={set ? 'green' : 'default'}>
+          {set ? '已配置' : '未配置'}
+        </Tag>
       ),
     },
     {
@@ -331,11 +326,11 @@ function AIConfigPage() {
           onFinish={handleSubmit}
         >
           <Form.Item
-            name="name"
+            name="config_name"
             label="配置名称"
             rules={[{ required: true, message: '请输入配置名称' }]}
           >
-            <Input placeholder="例如：生产环境 GPT-4" maxLength={100} />
+            <Input placeholder="例如：生产环境 DeepSeek" maxLength={100} />
           </Form.Item>
 
           <Form.Item
@@ -351,14 +346,6 @@ function AIConfigPage() {
           </Form.Item>
 
           <Form.Item
-            name="api_base_url"
-            label="API Base URL"
-            rules={[{ required: true, message: '请输入 API Base URL' }]}
-          >
-            <Input placeholder="例如：https://api.openai.com/v1" />
-          </Form.Item>
-
-          <Form.Item
             name="api_key"
             label="API Key"
             rules={editingConfig ? [] : [{ required: true, message: '请输入 API Key' }]}
@@ -370,7 +357,7 @@ function AIConfigPage() {
           </Form.Item>
 
           <Form.Item
-            name="model"
+            name="model_name"
             label="模型名称"
             rules={[{ required: true, message: '请输入模型名称' }]}
           >
@@ -381,37 +368,15 @@ function AIConfigPage() {
                 ))}
               </Select>
             ) : (
-              <Input placeholder="例如：gpt-4o" />
+              <Input placeholder="例如：deepseek-chat" />
             )}
           </Form.Item>
 
           <Form.Item
-            name="temperature"
-            label="Temperature"
-            tooltip="控制输出的随机性，0-2之间，值越低输出越确定"
+            name="description"
+            label="描述"
           >
-            <InputNumber
-              min={0}
-              max={2}
-              step={0.1}
-              precision={2}
-              style={{ width: '100%' }}
-              placeholder="0.7"
-            />
-          </Form.Item>
-
-          <Form.Item
-            name="max_tokens"
-            label="Max Tokens"
-            tooltip="最大输出 Token 数量"
-          >
-            <InputNumber
-              min={1}
-              max={128000}
-              step={256}
-              style={{ width: '100%' }}
-              placeholder="4096"
-            />
+            <Input.TextArea placeholder="可选的配置描述" rows={2} maxLength={500} />
           </Form.Item>
 
           {editingConfig && (
