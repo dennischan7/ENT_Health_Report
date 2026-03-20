@@ -3,8 +3,14 @@ Financial data API routes.
 Provides endpoints for querying balance sheets, income statements, and cash flow statements.
 """
 
-from typing import Optional
+from typing import Optional, List
+from datetime import datetime
+from io import BytesIO
+import threading
+from threading import Thread
+
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from pydantic import BaseModel, Field
@@ -580,15 +586,15 @@ def get_enterprise_data_status(
 
     # Determine status
     if not existing_years:
-        status = "no_data"
+        data_status = "no_data"
         has_data = False
         need_update = True
     elif len(existing_years) < years:
-        status = "partial"
+        data_status = "partial"
         has_data = True
         need_update = len(missing_years) > 0
     else:
-        status = "complete"
+        data_status = "complete"
         has_data = True
         need_update = False
 
@@ -603,7 +609,7 @@ def get_enterprise_data_status(
         expected_years=years,
         missing_years=missing_years,
         need_update=need_update,
-        status=status,
+        status=data_status,
     )
 
 
@@ -646,3 +652,453 @@ def refresh_enterprise_data(
         "success": True,
         "message": f"成功更新 {result.get('balance_count', 0)} 条资产负债表、{result.get('income_count', 0)} 条利润表、{result.get('cashflow_count', 0)} 条现金流量表数据",
     }
+
+
+# ==================== Batch Refresh Endpoints ====================
+
+# Global state for batch refresh (in-memory, per-process)
+_batch_refresh_state = {
+    "is_running": False,
+    "total": 0,
+    "completed": 0,
+    "failed": 0,
+    "started_at": None,
+    "current_enterprise": None,
+    "lock": threading.Lock(),
+}
+
+
+class BatchRefreshStatus(BaseModel):
+    """Batch refresh status response."""
+
+    is_running: bool
+    total: int
+    completed: int
+    failed: int
+    started_at: Optional[datetime]
+    current_enterprise: Optional[str]
+
+
+def _run_batch_refresh(db_url: str, years: int):
+    """Background task to refresh all enterprises."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker, scoped_session
+
+    engine = create_engine(db_url, pool_pre_ping=True)
+    SessionFactory = sessionmaker(bind=engine)
+    Session = scoped_session(SessionFactory)
+    db = Session()
+
+    try:
+        from app.models.enterprise import Enterprise
+        from app.services.batch_import import BatchImportService
+
+        enterprises = db.query(Enterprise).all()
+        total = len(enterprises)
+
+        _batch_refresh_state["total"] = total
+        service = BatchImportService(db)
+
+        for i, enterprise in enumerate(enterprises):
+            if not _batch_refresh_state["is_running"]:
+                break
+
+            _batch_refresh_state["current_enterprise"] = (
+                f"{enterprise.company_code} - {enterprise.company_name}"
+            )
+
+            try:
+                result = service.import_enterprise_data_ths(
+                    enterprise, years=years, skip_existing=True
+                )
+                if result.get("balance_count", 0) > 0 or result.get("income_count", 0) > 0:
+                    _batch_refresh_state["completed"] += 1
+                else:
+                    _batch_refresh_state["failed"] += 1
+            except Exception:
+                _batch_refresh_state["failed"] += 1
+
+            _batch_refresh_state["completed"] = i + 1
+
+    finally:
+        db.close()
+        Session.remove()
+        _batch_refresh_state["is_running"] = False
+        _batch_refresh_state["current_enterprise"] = None
+
+
+@router.get(
+    "/batch-refresh/status",
+    response_model=BatchRefreshStatus,
+    summary="Get batch refresh status",
+)
+def get_batch_refresh_status(
+    current_user: User = Depends(get_current_user),
+) -> BatchRefreshStatus:
+    """获取批量更新状态"""
+    with _batch_refresh_state["lock"]:
+        return BatchRefreshStatus(
+            is_running=_batch_refresh_state["is_running"],
+            total=_batch_refresh_state["total"],
+            completed=_batch_refresh_state["completed"],
+            failed=_batch_refresh_state["failed"],
+            started_at=_batch_refresh_state["started_at"],
+            current_enterprise=_batch_refresh_state["current_enterprise"],
+        )
+
+
+@router.post(
+    "/batch-refresh/start",
+    summary="Start batch refresh",
+)
+def start_batch_refresh(
+    years: int = Query(5, ge=1, le=10, description="获取最近N年数据"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """启动批量更新所有企业财务数据"""
+    with _batch_refresh_state["lock"]:
+        if _batch_refresh_state["is_running"]:
+            return {
+                "status": "already_running",
+                "message": "批量更新正在进行中，请等待完成",
+                "progress": {
+                    "completed": _batch_refresh_state["completed"],
+                    "total": _batch_refresh_state["total"],
+                },
+            }
+
+        _batch_refresh_state["is_running"] = True
+        _batch_refresh_state["total"] = db.query(Enterprise).count()
+        _batch_refresh_state["completed"] = 0
+        _batch_refresh_state["failed"] = 0
+        _batch_refresh_state["started_at"] = datetime.now()
+        _batch_refresh_state["current_enterprise"] = None
+
+    from app.core.config import settings
+
+    db_url = settings.DATABASE_URL
+
+    thread = Thread(target=_run_batch_refresh, args=(db_url, years), daemon=True)
+    thread.start()
+
+    return {
+        "status": "started",
+        "message": f"批量更新已启动，共 {_batch_refresh_state['total']} 家企业",
+        "total": _batch_refresh_state["total"],
+    }
+
+
+@router.post(
+    "/batch-refresh/stop",
+    summary="Stop batch refresh",
+)
+def stop_batch_refresh(
+    current_user: User = Depends(get_current_user),
+):
+    """停止正在运行的批量更新"""
+    with _batch_refresh_state["lock"]:
+        if not _batch_refresh_state["is_running"]:
+            return {
+                "status": "not_running",
+                "message": "当前没有正在运行的批量更新任务",
+            }
+
+        _batch_refresh_state["is_running"] = False
+
+    return {
+        "status": "stopped",
+        "message": "批量更新已停止",
+        "completed": _batch_refresh_state["completed"],
+        "total": _batch_refresh_state["total"],
+    }
+
+
+# ==================== Batch Export Endpoints ====================
+
+
+class ExportRequest(BaseModel):
+    """Export request body."""
+
+    enterprise_ids: List[int] = Field(..., description="企业ID列表")
+    years: List[int] = Field(..., description="年份列表")
+
+
+@router.post(
+    "/export",
+    summary="Export financial data to Excel",
+)
+def export_financial_data(
+    request: ExportRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    批量导出企业财务数据到Excel
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, Border, Side
+
+    # Create workbook
+    wb = Workbook()
+
+    # Create sheets
+    ws_balance = wb.active
+    ws_balance.title = "资产负债表"
+    ws_income = wb.create_sheet("利润表")
+    ws_cashflow = wb.create_sheet("现金流量表")
+
+    # Style
+    header_font = Font(bold=True)
+    header_alignment = Alignment(horizontal="center")
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
+
+    # Headers for balance sheet
+    balance_headers = [
+        "公司代码",
+        "公司名称",
+        "报告日期",
+        "报告年度",
+        "货币资金",
+        "交易性金融资产",
+        "应收账款",
+        "存货",
+        "流动资产合计",
+        "固定资产",
+        "资产总计",
+        "短期借款",
+        "应付账款",
+        "流动负债合计",
+        "长期借款",
+        "负债合计",
+        "实收资本",
+        "未分配利润",
+        "所有者权益合计",
+    ]
+
+    # Headers for income statement
+    income_headers = [
+        "公司代码",
+        "公司名称",
+        "报告日期",
+        "报告年度",
+        "营业收入",
+        "营业成本",
+        "销售费用",
+        "管理费用",
+        "财务费用",
+        "营业利润",
+        "利润总额",
+        "所得税费用",
+        "净利润",
+        "归属母公司净利润",
+        "基本每股收益",
+    ]
+
+    # Headers for cash flow statement
+    cashflow_headers = [
+        "公司代码",
+        "公司名称",
+        "报告日期",
+        "报告年度",
+        "销售商品收到的现金",
+        "税费返还",
+        "经营活动现金流入小计",
+        "购买商品支付的现金",
+        "支付给职工的现金",
+        "支付的各项税费",
+        "经营活动现金流出小计",
+        "经营活动产生的现金流量净额",
+        "收回投资收到的现金",
+        "取得投资收益收到的现金",
+        "投资活动现金流入小计",
+        "购建固定资产支付的现金",
+        "投资支付的现金",
+        "投资活动现金流出小计",
+        "投资活动产生的现金流量净额",
+        "吸收投资收到的现金",
+        "取得借款收到的现金",
+        "筹资活动现金流入小计",
+        "偿还债务支付的现金",
+        "分配股利支付的现金",
+        "筹资活动现金流出小计",
+        "筹资活动产生的现金流量净额",
+        "现金及现金等价物净增加额",
+        "期末现金及现金等价物余额",
+    ]
+
+    # Write headers
+    for col, header in enumerate(balance_headers, 1):
+        cell = ws_balance.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.alignment = header_alignment
+        cell.border = thin_border
+
+    for col, header in enumerate(income_headers, 1):
+        cell = ws_income.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.alignment = header_alignment
+        cell.border = thin_border
+
+    for col, header in enumerate(cashflow_headers, 1):
+        cell = ws_cashflow.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.alignment = header_alignment
+        cell.border = thin_border
+
+    # Data rows
+    row_balance = 2
+    row_income = 2
+    row_cashflow = 2
+
+    for ent_id in request.enterprise_ids:
+        enterprise = db.query(Enterprise).filter(Enterprise.id == ent_id).first()
+        if not enterprise:
+            continue
+
+        # Get financial data for specified years
+        for year in request.years:
+            # Balance sheet
+            balance = (
+                db.query(BalanceSheet)
+                .filter(BalanceSheet.enterprise_id == ent_id, BalanceSheet.report_year == year)
+                .first()
+            )
+
+            if balance:
+                row_data = [
+                    enterprise.company_code,
+                    enterprise.company_name,
+                    str(balance.report_date),
+                    balance.report_year,
+                    float(balance.cash) if balance.cash else 0,
+                    float(balance.trading_financial_assets)
+                    if balance.trading_financial_assets
+                    else 0,
+                    float(balance.accounts_receivable) if balance.accounts_receivable else 0,
+                    float(balance.inventory) if balance.inventory else 0,
+                    float(balance.total_current_assets) if balance.total_current_assets else 0,
+                    float(balance.fixed_assets) if balance.fixed_assets else 0,
+                    float(balance.total_assets) if balance.total_assets else 0,
+                    float(balance.short_term_borrowings) if balance.short_term_borrowings else 0,
+                    float(balance.accounts_payable) if balance.accounts_payable else 0,
+                    float(balance.total_current_liabilities)
+                    if balance.total_current_liabilities
+                    else 0,
+                    float(balance.long_term_borrowings) if balance.long_term_borrowings else 0,
+                    float(balance.total_liabilities) if balance.total_liabilities else 0,
+                    float(balance.paid_in_capital) if balance.paid_in_capital else 0,
+                    float(balance.retained_earnings) if balance.retained_earnings else 0,
+                    float(balance.total_equity) if balance.total_equity else 0,
+                ]
+                for col, value in enumerate(row_data, 1):
+                    ws_balance.cell(row=row_balance, column=col, value=value).border = thin_border
+                row_balance += 1
+
+            # Income statement
+            income = (
+                db.query(IncomeStatement)
+                .filter(
+                    IncomeStatement.enterprise_id == ent_id, IncomeStatement.report_year == year
+                )
+                .first()
+            )
+
+            if income:
+                row_data = [
+                    enterprise.company_code,
+                    enterprise.company_name,
+                    str(income.report_date),
+                    income.report_year,
+                    float(income.operating_revenue) if income.operating_revenue else 0,
+                    float(income.operating_cost) if income.operating_cost else 0,
+                    float(income.selling_expenses) if income.selling_expenses else 0,
+                    float(income.admin_expenses) if income.admin_expenses else 0,
+                    float(income.financial_expenses) if income.financial_expenses else 0,
+                    float(income.operating_profit) if income.operating_profit else 0,
+                    float(income.total_profit) if income.total_profit else 0,
+                    float(income.income_tax) if income.income_tax else 0,
+                    float(income.net_profit) if income.net_profit else 0,
+                    float(income.net_profit_parent) if income.net_profit_parent else 0,
+                    float(income.basic_eps) if income.basic_eps else 0,
+                ]
+                for col, value in enumerate(row_data, 1):
+                    ws_income.cell(row=row_income, column=col, value=value).border = thin_border
+                row_income += 1
+
+            # Cash flow statement
+            cashflow = (
+                db.query(CashFlowStatement)
+                .filter(
+                    CashFlowStatement.enterprise_id == ent_id, CashFlowStatement.report_year == year
+                )
+                .first()
+            )
+
+            if cashflow:
+                row_data = [
+                    enterprise.company_code,
+                    enterprise.company_name,
+                    str(cashflow.report_date),
+                    cashflow.report_year,
+                    float(cashflow.cash_received_sales) if cashflow.cash_received_sales else 0,
+                    float(cashflow.tax_refund_received) if cashflow.tax_refund_received else 0,
+                    0,  # 经营活动现金流入小计
+                    float(cashflow.cash_paid_goods) if cashflow.cash_paid_goods else 0,
+                    float(cashflow.cash_paid_employees) if cashflow.cash_paid_employees else 0,
+                    float(cashflow.cash_paid_taxes) if cashflow.cash_paid_taxes else 0,
+                    0,  # 经营活动现金流出小计
+                    float(cashflow.net_cash_operating) if cashflow.net_cash_operating else 0,
+                    float(cashflow.cash_received_investments)
+                    if cashflow.cash_received_investments
+                    else 0,
+                    0,
+                    0,  # 取得投资收益, 投资活动现金流入小计
+                    0,
+                    0,  # 购建固定资产, 投资支付
+                    0,  # 投资活动现金流出小计
+                    float(cashflow.net_cash_investing) if cashflow.net_cash_investing else 0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,  # 筹资活动
+                    float(cashflow.net_cash_financing) if cashflow.net_cash_financing else 0,
+                    float(cashflow.net_cash_increase) if cashflow.net_cash_increase else 0,
+                    float(cashflow.cash_end_period) if cashflow.cash_end_period else 0,
+                ]
+                for col, value in enumerate(row_data, 1):
+                    ws_cashflow.cell(row=row_cashflow, column=col, value=value).border = thin_border
+                row_cashflow += 1
+
+    # Adjust column widths
+    for ws in [ws_balance, ws_income, ws_cashflow]:
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+
+    # Save to bytes
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    # Return as streaming response
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=financial_data.xlsx"},
+    )

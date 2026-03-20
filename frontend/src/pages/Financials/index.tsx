@@ -14,6 +14,9 @@ import {
   Col,
   Typography,
   message,
+  Progress,
+  Popconfirm,
+  Checkbox,
 } from 'antd'
 import {
   SearchOutlined,
@@ -23,6 +26,8 @@ import {
   LineChartOutlined,
   EyeOutlined,
   ReloadOutlined,
+  DownloadOutlined,
+  StopOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import apiClient from '@/lib/api'
@@ -88,6 +93,16 @@ function FinancialsPage() {
   // Enterprise data status state
   const [enterpriseStatuses, setEnterpriseStatuses] = useState<Record<number, EnterpriseDataStatus>>({})
   const [updatingId, setUpdatingId] = useState<number | null>(null)
+
+  // Batch refresh state
+  const [batchRefreshRunning, setBatchRefreshRunning] = useState(false)
+  const [batchRefreshProgress, setBatchRefreshProgress] = useState({ total: 0, completed: 0, failed: 0, currentEnterprise: '' })
+
+  // Export state
+  const [selectedRowKeys, setSelectedRowKeys] = useState<number[]>([])
+  const [exporting, setExporting] = useState(false)
+  const [yearModalVisible, setYearModalVisible] = useState(false)
+  const [selectedYears, setSelectedYears] = useState<number[]>([2024, 2023, 2022, 2021])
 
   // Fetch global statistics
   const fetchGlobalStats = async () => {
@@ -169,6 +184,98 @@ function FinancialsPage() {
       message.error('数据更新失败')
     } finally {
       setUpdatingId(null)
+    }
+  }
+
+  // Batch refresh functions
+  const startBatchRefresh = async () => {
+    setBatchRefreshRunning(true)
+    setBatchRefreshProgress({ total: 0, completed: 0, failed: 0, currentEnterprise: '' })
+    try {
+      const response = await apiClient.post('/api/financials/batch-refresh/start')
+      message.success(response.data.message)
+      pollBatchRefreshStatus()
+    } catch (error: any) {
+      message.error(error.response?.data?.message || '启动批量更新失败')
+      setBatchRefreshRunning(false)
+    }
+  }
+
+  const pollBatchRefreshStatus = async () => {
+    try {
+      const response = await apiClient.get('/api/financials/batch-refresh/status')
+      const status = response.data
+      setBatchRefreshProgress({
+        total: status.total,
+        completed: status.completed,
+        failed: status.failed,
+        currentEnterprise: status.current_enterprise || '',
+      })
+
+      if (status.is_running) {
+        setTimeout(pollBatchRefreshStatus, 2000)
+      } else {
+        setBatchRefreshRunning(false)
+        fetchGlobalStats()
+        fetchEnterprises()
+        if (status.completed > 0) {
+          message.success(`批量更新完成！成功 ${status.completed} 家，失败 ${status.failed} 家`)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to poll status:', error)
+      setBatchRefreshRunning(false)
+    }
+  }
+
+  const stopBatchRefresh = async () => {
+    try {
+      await apiClient.post('/api/financials/batch-refresh/stop')
+      message.info('批量更新已停止')
+    } catch (error) {
+      message.error('停止失败')
+    }
+  }
+
+  // Export functions
+  const handleExport = async () => {
+    if (selectedRowKeys.length === 0) {
+      message.warning('请选择要导出的企业')
+      return
+    }
+    if (selectedYears.length === 0) {
+      message.warning('请选择要导出的年份')
+      return
+    }
+
+    setExporting(true)
+    try {
+      const response = await apiClient.post(
+        '/api/financials/export',
+        {
+          enterprise_ids: selectedRowKeys,
+          years: selectedYears,
+        },
+        { responseType: 'blob' }
+      )
+
+      // Download file
+      const blob = new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `financial_data_${new Date().toISOString().split('T')[0]}.xlsx`
+      link.click()
+      window.URL.revokeObjectURL(url)
+
+      message.success(`成功导出 ${selectedRowKeys.length} 家企业的财务数据`)
+      setYearModalVisible(false)
+    } catch (error) {
+      message.error('导出失败')
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -356,19 +463,30 @@ const balanceSheetColumns: ColumnsType<BalanceSheet> = [
   const dataRate = globalStats?.data_coverage_rate ?? (total > 0 ? ((enterprises.filter(e => e.balance_sheet_count > 0).length / Math.min(total, pageSize)) * 100).toFixed(1) : '0')
   const totalRecords = globalStats?.total_records ?? enterprises.reduce((sum, e) => sum + e.balance_sheet_count + e.income_statement_count + e.cashflow_statement_count, 0)
 
+  // Row selection config for export
+  const rowSelection = {
+    selectedRowKeys,
+    onChange: (newSelectedRowKeys: React.Key[]) => {
+      setSelectedRowKeys(newSelectedRowKeys as number[])
+    },
+  }
+
+  // Available years for export
+  const availableYears = [2024, 2023, 2022, 2021, 2020]
+
   return (
     <div>
       {/* Summary Statistics */}
       <Card style={{ marginBottom: 16 }} loading={statsLoading && !globalStats}>
         <Row gutter={24}>
-          <Col span={6}>
+          <Col span={5}>
             <Statistic
               title="企业总数"
               value={totalEnterprises}
               prefix={<BankOutlined />}
             />
           </Col>
-          <Col span={6}>
+          <Col span={5}>
             <Statistic
               title="已导入财务数据"
               value={withDataEnterprises}
@@ -377,7 +495,7 @@ const balanceSheetColumns: ColumnsType<BalanceSheet> = [
               valueStyle={{ color: '#3f8600' }}
             />
           </Col>
-          <Col span={6}>
+          <Col span={5}>
             <Statistic
               title="数据覆盖率"
               value={dataRate}
@@ -386,19 +504,57 @@ const balanceSheetColumns: ColumnsType<BalanceSheet> = [
               valueStyle={{ color: parseFloat(String(dataRate)) > 90 ? '#3f8600' : '#cf1322' }}
             />
           </Col>
-          <Col span={6}>
+          <Col span={5}>
             <Statistic
               title="财务报表总记录"
               value={totalRecords}
               prefix={<DollarOutlined />}
             />
           </Col>
+          <Col span={4}>
+            {/* Batch Refresh Button */}
+            {batchRefreshRunning ? (
+              <div>
+                <Button danger onClick={stopBatchRefresh} icon={<StopOutlined />}>
+                  停止更新
+                </Button>
+                <Progress 
+                  percent={Math.round((batchRefreshProgress.completed / batchRefreshProgress.total) * 100) || 0}
+                  size="small"
+                  style={{ marginTop: 8 }}
+                />
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {batchRefreshProgress.completed}/{batchRefreshProgress.total}
+                  {batchRefreshProgress.currentEnterprise && ` - ${batchRefreshProgress.currentEnterprise}`}
+                </Text>
+              </div>
+            ) : (
+              <Popconfirm
+                title="批量更新所有企业财务数据"
+                description="将更新所有4492家企业的财务数据，预计耗时约1小时，确定继续？"
+                onConfirm={startBatchRefresh}
+                okText="确定"
+                cancelText="取消"
+              >
+                <Button type="primary" icon={<ReloadOutlined />}>
+                  一键更新
+                </Button>
+              </Popconfirm>
+            )}
+          </Col>
         </Row>
       </Card>
 
       {/* Enterprise List */}
       <Card
-        title="企业财务数据"
+        title={
+          <Space>
+            <span>企业财务数据</span>
+            {selectedRowKeys.length > 0 && (
+              <Tag color="blue">已选 {selectedRowKeys.length} 家</Tag>
+            )}
+          </Space>
+        }
         extra={
           <Space>
             <Input
@@ -419,6 +575,15 @@ const balanceSheetColumns: ColumnsType<BalanceSheet> = [
               <Option value="yes">有数据</Option>
               <Option value="no">无数据</Option>
             </Select>
+            {selectedRowKeys.length > 0 && (
+              <Button 
+                type="primary" 
+                icon={<DownloadOutlined />}
+                onClick={() => setYearModalVisible(true)}
+              >
+                导出选中
+              </Button>
+            )}
           </Space>
         }
       >
@@ -429,6 +594,7 @@ const balanceSheetColumns: ColumnsType<BalanceSheet> = [
           loading={loading}
           scroll={{ x: 800 }}
           size="small"
+          rowSelection={rowSelection}
           pagination={{
             current: page,
             pageSize,
@@ -439,6 +605,42 @@ const balanceSheetColumns: ColumnsType<BalanceSheet> = [
           }}
         />
       </Card>
+
+      {/* Year Selection Modal for Export */}
+      <Modal
+        title="选择导出年份"
+        open={yearModalVisible}
+        onCancel={() => setYearModalVisible(false)}
+        onOk={handleExport}
+        confirmLoading={exporting}
+        okText="导出"
+        cancelText="取消"
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text>将导出 <Text strong>{selectedRowKeys.length}</Text> 家企业的财务数据</Text>
+        </div>
+        <div>
+          <Text>选择年份：</Text>
+          <div style={{ marginTop: 8 }}>
+            {availableYears.map(year => (
+              <Checkbox
+                key={year}
+                checked={selectedYears.includes(year)}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setSelectedYears([...selectedYears, year])
+                  } else {
+                    setSelectedYears(selectedYears.filter(y => y !== year))
+                  }
+                }}
+                style={{ marginRight: 16 }}
+              >
+                {year}年
+              </Checkbox>
+            ))}
+          </div>
+        </div>
+      </Modal>
 
       {/* Financial Detail Modal */}
       <Modal
