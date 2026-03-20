@@ -459,14 +459,14 @@ function AIAnalysisPage() {
                   </Text>
                   {getStatusTag(currentTask.status)}
                 </Space>
-                {currentTask.status === ReportStatus.PROCESSING && (
+                {currentTask.status === 'generating' && (
                   <Progress
                     percent={currentTask.progress || 0}
                     status="active"
                     strokeColor={{ from: '#108ee9', to: '#87d068' }}
                   />
                 )}
-                {currentTask.status === ReportStatus.COMPLETED && (
+                {currentTask.status === 'completed' && (
                   <Button
                     type="primary"
                     icon={<DownloadOutlined />}

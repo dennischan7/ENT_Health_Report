@@ -344,14 +344,18 @@ class LLMClient:
         max_tokens: int = 2000,
     ) -> T:
         """
-        Generate a structured response from the LLM using a Pydantic model.
+        Generate a structured response from the LLM using a Pydantic schema.
 
-        This method ensures the LLM response conforms to the specified Pydantic
-        schema, providing type-safe structured output.
+        This method uses LangChain's structured output feature to ensure
+        the response conforms to the provided Pydantic schema.
+
+        Note: Some providers (like DeepSeek, Moonshot, etc.) don't support
+        native structured output. For these providers, we use JSON mode
+        and manual parsing.
 
         Args:
             messages: List of message dictionaries or LangChain message objects.
-            schema: A Pydantic BaseModel class defining the expected structure.
+            schema: Pydantic model class defining the expected response structure.
             provider: The LLM provider to use.
             model: The model name/identifier.
             api_key: The API key for authentication.
@@ -360,30 +364,15 @@ class LLMClient:
             max_tokens: Maximum tokens in the response (default: 2000).
 
         Returns:
-            T: An instance of the Pydantic model with the LLM's response.
+            An instance of the provided Pydantic schema.
 
         Raises:
-            LLMError: If the provider is not supported.
-            LLMGenerationError: If generation fails after all retries.
-
-        Example:
-            >>> from pydantic import BaseModel, Field
-            >>>
-            >>> class AnalysisResult(BaseModel):
-            ...     sentiment: str = Field(description="Positive, negative, or neutral")
-            ...     confidence: float = Field(description="Confidence score 0-1")
-            ...     summary: str = Field(description="Brief summary of the text")
-            >>>
-            >>> client = LLMClient()
-            >>> result = client.generate_structured(
-            ...     messages=[{"role": "user", "content": "Analyze: This product is amazing!"}],
-            ...     schema=AnalysisResult,
-            ...     provider="openai",
-            ...     model="gpt-4",
-            ...     api_key="your-api-key"
-            ... )
-            >>> print(result.sentiment)  # "positive"
+            LLMGenerationError: If generation fails after retries.
+            LLMError: If the response cannot be parsed into the schema.
         """
+        import json
+        from pydantic import ValidationError
+
         chat_model = self._create_chat_model(
             provider=provider,
             model=model,
@@ -393,14 +382,63 @@ class LLMClient:
             max_tokens=max_tokens,
         )
 
-        # Create a structured output model
-        structured_model = chat_model.with_structured_output(schema)
         converted_messages = self._convert_messages(messages)
 
-        def _invoke() -> T:
-            return structured_model.invoke(converted_messages)
+        # Check if provider supports structured output
+        # Providers known to support native structured output
+        STRUCTURED_OUTPUT_PROVIDERS = {
+            AIProvider.OPENAI,
+            AIProvider.ANTHROPIC,
+            "openai",
+            "anthropic",
+        }
 
-        return self._retry_with_backoff(_invoke)
+        provider_str = provider.value if hasattr(provider, "value") else str(provider)
+
+        if provider_str.lower() in [
+            p.value if hasattr(p, "value") else str(p).lower() for p in STRUCTURED_OUTPUT_PROVIDERS
+        ]:
+            # Use native structured output
+            structured_model = chat_model.with_structured_output(schema)
+
+            def _invoke() -> T:
+                return structured_model.invoke(converted_messages)
+
+            return self._retry_with_backoff(_invoke)
+        else:
+            # Use JSON mode for providers that don't support structured output
+            # Add instruction for JSON output
+            schema_json = schema.model_json_schema()
+            json_instruction = f"\n\nIMPORTANT: You must respond with a valid JSON object that matches this schema:\n{json.dumps(schema_json, indent=2)}\n\nRespond ONLY with the JSON object, no other text."
+
+            # Add instruction to the last user message
+            enhanced_messages = []
+            for msg in converted_messages:
+                enhanced_messages.append(msg)
+
+            # Add JSON instruction as a system message
+            enhanced_messages.append(SystemMessage(content=json_instruction))
+
+            def _invoke_json() -> T:
+                response = chat_model.invoke(enhanced_messages)
+                content = response.content
+
+                # Try to extract JSON from the response
+                # Handle potential markdown code blocks
+                if "```json" in content:
+                    start = content.find("```json") + 7
+                    end = content.find("```", start)
+                    content = content[start:end].strip()
+                elif "```" in content:
+                    start = content.find("```") + 3
+                    end = content.find("```", start)
+                    content = content[start:end].strip()
+
+                # Parse JSON and validate against schema
+                data = json.loads(content)
+                return schema.model_validate(data)
+
+            return self._retry_with_backoff(_invoke_json)
 
     def get_active_client(
         self,
