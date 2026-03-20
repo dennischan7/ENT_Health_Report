@@ -72,6 +72,7 @@ class AIConfigResponse(BaseModel):
     provider: AIProvider
     model_name: str
     api_key_set: bool = Field(..., description="Whether API key is configured")
+    is_active: bool = Field(default=False, description="Whether this configuration is active")
     is_default: bool
     description: Optional[str]
     created_by: Optional[int]

@@ -65,6 +65,7 @@ def _mask_config_response(config: AIConfig) -> AIConfigResponse:
         provider=schema_provider,
         model_name=config.model_name,
         api_key_set=bool(config.encrypted_api_key),
+        is_active=config.is_active,
         is_default=config.is_default,
         description=None,  # Model doesn't have description field
         created_by=None,  # Model doesn't have created_by field

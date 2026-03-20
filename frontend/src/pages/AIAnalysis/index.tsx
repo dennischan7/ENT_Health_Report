@@ -25,7 +25,7 @@ import {
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import apiClient from '@/lib/api'
-import { ReportStatus, type ReportTask, type ReportTaskCreate } from '@/types'
+import type { ReportTaskCreate } from '@/types'
 
 const { Option } = Select
 const { Text } = Typography
@@ -38,9 +38,20 @@ interface EnterpriseSearchResult {
 }
 
 // Report task with enterprise name (from API)
-interface ReportTaskWithEnterprise extends ReportTask {
+interface ReportTaskWithEnterprise {
+  task_id: string
+  enterprise_id?: number
   enterprise_code?: string
   enterprise_name?: string
+  report_type?: string
+  status: string
+  progress?: number
+  message?: string
+  error_message?: string
+  result_url?: string
+  created_at?: string
+  updated_at?: string
+  report_id?: number
 }
 
 // Task status configuration
@@ -104,7 +115,7 @@ function AIAnalysisPage() {
     setHistoryLoading(true)
     try {
       const response = await apiClient.get<{ items: ReportTaskWithEnterprise[]; total: number }>(
-        '/api/reports/tasks',
+        '/api/reports',
         { params: { page, page_size: pageSize } }
       )
       setReportHistory(response.data.items)
@@ -114,9 +125,9 @@ function AIAnalysisPage() {
       const allTasks = response.data.items
       setStats({
         total: response.data.total,
-        completed: allTasks.filter(t => t.status === ReportStatus.COMPLETED).length,
-        pending: allTasks.filter(t => t.status === ReportStatus.PENDING || t.status === ReportStatus.PROCESSING).length,
-        failed: allTasks.filter(t => t.status === ReportStatus.FAILED).length,
+        completed: allTasks.filter(t => t.status === 'completed').length,
+        pending: allTasks.filter(t => t.status === 'pending' || t.status === 'generating').length,
+        failed: allTasks.filter(t => t.status === 'failed').length,
       })
     } catch (error) {
       message.error('获取报告历史失败')
@@ -126,16 +137,16 @@ function AIAnalysisPage() {
   }
 
   // Fetch current task status (polling)
-  const fetchTaskStatus = useCallback(async (taskId: number) => {
+  const fetchTaskStatus = useCallback(async (taskId: string) => {
     try {
-      const response = await apiClient.get<ReportTaskWithEnterprise>(`/api/reports/tasks/${taskId}`)
+      const response = await apiClient.get<ReportTaskWithEnterprise>(`/api/reports/${taskId}/status`)
       const task = response.data
       setCurrentTask(task)
 
       // Stop polling if task is complete or failed
-      if (task.status === ReportStatus.COMPLETED || task.status === ReportStatus.FAILED) {
+      if (task.status === 'completed' || task.status === 'failed') {
         setPollingEnabled(false)
-        if (task.status === ReportStatus.COMPLETED) {
+        if (task.status === 'completed') {
           message.success('报告生成完成！')
         } else {
           message.error(`报告生成失败: ${task.error_message || '未知错误'}`)
@@ -149,7 +160,7 @@ function AIAnalysisPage() {
   }, [])
 
   // Start polling
-  const startPolling = useCallback((taskId: number) => {
+  const startPolling = useCallback((taskId: string) => {
     setPollingEnabled(true)
     const poll = () => {
       fetchTaskStatus(taskId)
@@ -214,11 +225,10 @@ function AIAnalysisPage() {
         enterprise_id: selectedEnterpriseId,
         report_type: 'health_diagnosis',
       }
-      const response = await apiClient.post<ReportTaskWithEnterprise>('/api/reports/tasks', createData)
-      const task = response.data
-      setCurrentTask(task)
+      const response = await apiClient.post<{ task_id: string; status: string; message: string }>('/api/reports/generate', createData)
+      const { task_id } = response.data
       message.success('报告生成任务已创建')
-      startPolling(task.id)
+      startPolling(task_id)
       fetchReportHistory()
     } catch (error: any) {
       message.error(error.response?.data?.detail || '创建报告任务失败')
@@ -231,7 +241,7 @@ function AIAnalysisPage() {
   const handleCancelTask = async () => {
     if (!currentTask) return
     try {
-      await apiClient.post(`/api/reports/tasks/${currentTask.id}/cancel`)
+      await apiClient.delete(`/api/reports/${currentTask.task_id}`)
       message.info('任务已取消')
       stopPolling()
       setCurrentTask(null)
@@ -243,17 +253,17 @@ function AIAnalysisPage() {
 
   // Download report
   const handleDownload = async (task: ReportTaskWithEnterprise) => {
-    if (!task.result_url) {
-      message.error('报告文件不存在')
+    if (!task.task_id) {
+      message.error('任务ID不存在')
       return
     }
     try {
-      const response = await apiClient.get(task.result_url, { responseType: 'blob' })
-      const blob = new Blob([response.data], { type: 'application/pdf' })
+      const response = await apiClient.get(`/api/reports/${task.task_id}/download`, { responseType: 'blob' })
+      const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
       const url = window.URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = `health_report_${task.enterprise_code}_${task.id}.pdf`
+      link.download = `health_report_${task.enterprise_code || 'enterprise'}_${task.task_id}.docx`
       link.click()
       window.URL.revokeObjectURL(url)
     } catch (error) {
@@ -314,10 +324,10 @@ function AIAnalysisPage() {
       key: 'progress',
       width: 150,
       render: (progress, record) => {
-        if (record.status === ReportStatus.COMPLETED) {
+        if (record.status === 'completed') {
           return <Progress percent={100} size="small" status="success" />
         }
-        if (record.status === ReportStatus.FAILED) {
+        if (record.status === 'failed') {
           return <Progress percent={progress || 0} size="small" status="exception" />
         }
         return <Progress percent={progress || 0} size="small" />
@@ -343,7 +353,7 @@ function AIAnalysisPage() {
       width: 100,
       render: (_, record) => (
         <Space>
-          {record.status === ReportStatus.COMPLETED && record.result_url && (
+          {record.status === 'completed' && (
             <Button
               type="link"
               size="small"
@@ -353,7 +363,7 @@ function AIAnalysisPage() {
               下载
             </Button>
           )}
-          {record.status === ReportStatus.FAILED && (
+          {record.status === 'failed' && (
             <Text type="secondary" style={{ fontSize: 12 }}>
               {record.error_message || '生成失败'}
             </Text>
