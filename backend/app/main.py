@@ -92,13 +92,14 @@ async def root():
 
 
 # Include routers
-from app.api import auth, users, enterprises, financials, ai_configs
+from app.api import auth, users, enterprises, financials, ai_configs, reports
 
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(users.router, prefix="/api/users", tags=["Users"])
 app.include_router(enterprises.router, prefix="/api/enterprises", tags=["Enterprises"])
 app.include_router(financials.router, prefix="/api/financials", tags=["Financials"])
 app.include_router(ai_configs.router, prefix="/api/ai-configs", tags=["AI Configurations"])
+app.include_router(reports.router, prefix="/api/reports", tags=["Reports"])
 
 
 if __name__ == "__main__":

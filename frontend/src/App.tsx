@@ -5,6 +5,7 @@ import EnterprisesPage from './pages/Enterprises'
 import FinancialsPage from './pages/Financials'
 import UsersPage from './pages/Users'
 import AIConfigPage from './pages/AIConfig'
+import AIAnalysisPage from './pages/AIAnalysis'
 import MainLayout from './components/Layout/MainLayout'
 
 // Protected Route wrapper
@@ -28,6 +29,7 @@ function App() {
             <Route path="/financials" element={<FinancialsPage />} />
             <Route path="/users" element={<UsersPage />} />
             <Route path="/ai-config" element={<AIConfigPage />} />
+            <Route path="/ai-analysis" element={<AIAnalysisPage />} />
           </Route>
         </Route>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
