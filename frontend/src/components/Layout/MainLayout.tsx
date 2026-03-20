@@ -8,6 +8,7 @@ import {
   LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  DollarOutlined,
 } from '@ant-design/icons'
 
 const { Header, Sider, Content } = Layout
@@ -23,6 +24,7 @@ interface MenuItem {
 const menuItems: MenuItem[] = [
   { key: 'dashboard', icon: <DashboardOutlined />, label: '仪表盘', path: '/dashboard' },
   { key: 'enterprises', icon: <TeamOutlined />, label: '企业管理', path: '/enterprises' },
+  { key: 'financials', icon: <DollarOutlined />, label: '财务数据', path: '/financials' },
   { key: 'users', icon: <UserOutlined />, label: '用户管理', path: '/users' },
 ]
 

@@ -14,6 +14,7 @@ from app.schemas.enterprise import (
     EnterpriseUpdate,
     EnterpriseResponse,
     EnterpriseListResponse,
+    EnterpriseDetail,
 )
 from app.api.deps import get_current_user
 
@@ -224,3 +225,24 @@ def list_industries(
     """
     industries = db.query(Enterprise.industry_name).distinct().all()
     return [i[0] for i in industries if i[0]]
+
+
+@router.get(
+    "/{enterprise_id}/detail", response_model=EnterpriseDetail, summary="Get enterprise detail"
+)
+def get_enterprise_detail(
+    enterprise_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> EnterpriseDetail:
+    """
+    Get detailed information for a specific enterprise.
+    获取指定企业的详细信息（包含扩展字段）。
+    """
+    enterprise = db.query(Enterprise).filter(Enterprise.id == enterprise_id).first()
+    if not enterprise:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Enterprise with id {enterprise_id} not found",
+        )
+    return EnterpriseDetail.model_validate(enterprise)

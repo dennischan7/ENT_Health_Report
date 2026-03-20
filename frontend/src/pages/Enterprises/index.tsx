@@ -11,13 +11,18 @@ import {
   message,
   Popconfirm,
   Tag,
+  Descriptions,
+  Spin,
+  Divider,
 } from 'antd'
 import {
   PlusOutlined,
   SearchOutlined,
+  EyeOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import apiClient from '@/lib/api'
+import type { EnterpriseDetail } from '@/types'
 
 const { Option } = Select
 
@@ -54,6 +59,9 @@ function EnterprisesPage() {
   const [modalVisible, setModalVisible] = useState(false)
   const [editingEnterprise, setEditingEnterprise] = useState<Enterprise | null>(null)
   const [form] = Form.useForm<EnterpriseForm>()
+  const [detailVisible, setDetailVisible] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailData, setDetailData] = useState<EnterpriseDetail | null>(null)
 
   const fetchCategories = async () => {
     try {
@@ -115,6 +123,21 @@ function EnterprisesPage() {
     }
   }
 
+  const handleViewDetail = async (id: number) => {
+    setDetailVisible(true)
+    setDetailLoading(true)
+    setDetailData(null)
+    try {
+      const response = await apiClient.get(`/api/enterprises/${id}/detail`)
+      setDetailData(response.data)
+    } catch (error) {
+      message.error('获取企业详情失败')
+      setDetailVisible(false)
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
   const handleSubmit = async (values: EnterpriseForm) => {
     try {
       if (editingEnterprise) {
@@ -168,9 +191,10 @@ function EnterprisesPage() {
     {
       title: '操作',
       key: 'action',
-      width: 100,
+      width: 150,
       render: (_, r) => (
         <Space>
+          <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => handleViewDetail(r.id)}>详情</Button>
           <Button type="link" size="small" onClick={() => handleEdit(r)}>编辑</Button>
           <Popconfirm title="确定?" onConfirm={() => handleDelete(r.id)}>
             <Button type="link" size="small" danger>删除</Button>
@@ -262,6 +286,78 @@ function EnterprisesPage() {
             </Select>
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* 企业详情弹窗 */}
+      <Modal
+        title={detailData ? `${detailData.company_code} - ${detailData.company_name}` : '企业详情'}
+        open={detailVisible}
+        onCancel={() => setDetailVisible(false)}
+        footer={null}
+        width={800}
+        destroyOnClose
+      >
+        <Spin spinning={detailLoading}>
+          {detailData && (
+            <>
+              <Descriptions title="基本信息" bordered column={2} size="small">
+                <Descriptions.Item label="公司名称">{detailData.company_name || '-'}</Descriptions.Item>
+                <Descriptions.Item label="英文名称">{detailData.english_name || '-'}</Descriptions.Item>
+                <Descriptions.Item label="股票代码">
+                  <Tag color="blue">{detailData.company_code}</Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="行业">{detailData.industry_name || '-'}</Descriptions.Item>
+                <Descriptions.Item label="法人代表" span={2}>{detailData.legal_representative || '-'}</Descriptions.Item>
+              </Descriptions>
+
+              <Divider style={{ margin: '16px 0' }} />
+
+              <Descriptions title="注册信息" bordered column={2} size="small">
+                <Descriptions.Item label="注册资金">
+                  {detailData.registered_capital ? `${detailData.registered_capital.toLocaleString()} 万元` : '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="成立日期">{detailData.establish_date || '-'}</Descriptions.Item>
+                <Descriptions.Item label="上市日期">{detailData.listing_date || '-'}</Descriptions.Item>
+                <Descriptions.Item label="门类">{detailData.category_name || '-'}</Descriptions.Item>
+                <Descriptions.Item label="注册地址" span={2}>{detailData.registered_address || '-'}</Descriptions.Item>
+                <Descriptions.Item label="办公地址" span={2}>{detailData.office_address || '-'}</Descriptions.Item>
+              </Descriptions>
+
+              <Divider style={{ margin: '16px 0' }} />
+
+              <Descriptions title="联系方式" bordered column={2} size="small">
+                <Descriptions.Item label="联系电话">{detailData.phone || '-'}</Descriptions.Item>
+                <Descriptions.Item label="电子邮箱">{detailData.email || '-'}</Descriptions.Item>
+                <Descriptions.Item label="传真">{detailData.fax || '-'}</Descriptions.Item>
+                <Descriptions.Item label="官方网站">
+                  {detailData.website ? (
+                    <a href={detailData.website} target="_blank" rel="noopener noreferrer">{detailData.website}</a>
+                  ) : '-'}
+                </Descriptions.Item>
+              </Descriptions>
+
+              <Divider style={{ margin: '16px 0' }} />
+
+              <Descriptions title="经营信息" bordered column={1} size="small">
+                <Descriptions.Item label="主营业务">
+                  <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {detailData.main_business || '-'}
+                  </div>
+                </Descriptions.Item>
+                <Descriptions.Item label="经营范围">
+                  <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {detailData.business_scope || '-'}
+                  </div>
+                </Descriptions.Item>
+                <Descriptions.Item label="机构简介">
+                  <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {detailData.company_profile || '-'}
+                  </div>
+                </Descriptions.Item>
+              </Descriptions>
+            </>
+          )}
+        </Spin>
       </Modal>
     </div>
   )
