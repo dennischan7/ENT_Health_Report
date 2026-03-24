@@ -57,6 +57,13 @@ from app.schemas.report import (
     RiskAssessmentSection,
     RecommendationsSection,
 )
+from app.services.report_styles import (
+    Colors, Fonts, ChartSettings, PageSettings,
+    set_table_header_style, set_table_alternating_rows,
+    set_cell_value_format, highlight_target_row,
+    format_number, format_change_rate,
+    setup_page_margins, add_page_header, add_page_footer,
+)
 
 
 # Use non-interactive backend for matplotlib (required for server environments)
@@ -162,6 +169,9 @@ class ReportGenerator:
 
             # Set up document styles
             self._setup_document_styles(doc)
+
+            # Apply professional page margins
+            setup_page_margins(doc)
 
             # 1. Title Page
             self._add_title_page(doc, report_data)
@@ -422,7 +432,7 @@ class ReportGenerator:
         doc.add_page_break()
 
     def _add_metrics_table(self, doc: Document, metrics: List[FinancialMetric]) -> None:
-        """Add a table of financial metrics."""
+        """Add a professionally styled table of financial metrics."""
         if not metrics:
             return
 
@@ -436,19 +446,25 @@ class ReportGenerator:
         headers = ["指标名称", "当前值", "单位", "同比变化", "行业平均"]
         for i, header in enumerate(headers):
             header_cells[i].text = header
-            # Make header bold
-            for paragraph in header_cells[i].paragraphs:
-                for run in paragraph.runs:
-                    run.font.bold = True
+
+        # Apply professional header style
+        set_table_header_style(table)
 
         # Data rows
         for metric in metrics:
             row_cells = table.add_row().cells
             row_cells[0].text = metric.name
-            row_cells[1].text = self._format_decimal(metric.value)
+            set_cell_value_format(row_cells[1], self._format_decimal(metric.value), is_number=True)
             row_cells[2].text = metric.unit
-            row_cells[3].text = self._format_change_rate(metric.change_rate)
-            row_cells[4].text = self._format_decimal(metric.industry_avg)
+
+            # Format change rate with color
+            change_str, is_positive = format_change_rate(metric.change_rate)
+            set_cell_value_format(row_cells[3], change_str, is_number=True, is_positive=is_positive)
+
+            set_cell_value_format(row_cells[4], self._format_decimal(metric.industry_avg), is_number=True)
+
+        # Apply alternating row colors
+        set_table_alternating_rows(table)
 
         doc.add_paragraph()  # Add spacing after table
 
@@ -494,7 +510,7 @@ class ReportGenerator:
 
         Args:
             chart_data: Chart data including labels and datasets.
-            chart_type: Type of chart ('bar', 'line', 'pie').
+            chart_type: Type of chart ('bar', 'line', 'pie', 'radar').
 
         Returns:
             BytesIO containing the chart image, or None if creation fails.
@@ -505,18 +521,8 @@ class ReportGenerator:
             x_labels = chart_data.x_labels
             x = range(len(x_labels))
 
-            colors = [
-                "#4472C4",
-                "#ED7D31",
-                "#A5A5A5",
-                "#FFC000",
-                "#5B9BD5",
-                "#70AD47",
-                "#255E91",
-                "#9E480E",
-                "#636363",
-                "#997300",
-            ]
+            # Use professional color palette
+            colors = ChartSettings.COLORS
 
             if chart_type == "bar":
                 # Grouped bar chart for multiple datasets
@@ -524,13 +530,23 @@ class ReportGenerator:
                 for i, dataset in enumerate(chart_data.datasets):
                     offset = (i - len(chart_data.datasets) / 2 + 0.5) * bar_width
                     values = [float(v) if v is not None else 0 for v in dataset.get("data", [])]
-                    ax.bar(
+                    bars = ax.bar(
                         [xi + offset for xi in x],
                         values,
                         bar_width,
                         label=dataset.get("label", f"Series {i + 1}"),
                         color=colors[i % len(colors)],
                     )
+                    # Add data labels on bars
+                    for bar, val in zip(bars, values):
+                        if val != 0:
+                            height = bar.get_height()
+                            ax.annotate(f'{val:,.0f}',
+                                        xy=(bar.get_x() + bar.get_width() / 2, height),
+                                        xytext=(0, 3),
+                                        textcoords="offset points",
+                                        ha='center', va='bottom',
+                                        fontsize=8)
 
                 ax.set_xticks(x)
                 ax.set_xticklabels(x_labels, rotation=45, ha="right")
@@ -538,19 +554,32 @@ class ReportGenerator:
             elif chart_type == "line":
                 for i, dataset in enumerate(chart_data.datasets):
                     values = [float(v) if v is not None else 0 for v in dataset.get("data", [])]
-                    ax.plot(
+                    line = ax.plot(
                         x,
                         values,
                         marker="o",
                         label=dataset.get("label", f"Series {i + 1}"),
                         color=colors[i % len(colors)],
                         linewidth=2,
+                        markersize=6,
                     )
+                    # Add data labels on points
+                    for xi, val in zip(x, values):
+                        ax.annotate(f'{val:,.0f}',
+                                    xy=(xi, val),
+                                    xytext=(0, 5),
+                                    textcoords="offset points",
+                                    ha='center', va='bottom',
+                                    fontsize=8)
 
                 ax.set_xticks(x)
                 ax.set_xticklabels(x_labels)
 
-            ax.set_title(chart_data.title, fontsize=12, fontweight="bold")
+            elif chart_type == "radar":
+                # Radar chart for multi-dimensional comparison
+                return self._create_radar_chart(chart_data)
+
+            ax.set_title(chart_data.title, fontsize=12, fontweight="bold", color=Colors.PRIMARY)
             ax.legend(loc="best", fontsize=9)
             ax.grid(True, alpha=0.3)
 
@@ -559,9 +588,9 @@ class ReportGenerator:
 
             plt.tight_layout()
 
-            # Save to BytesIO
+            # Save to BytesIO with high DPI
             image_stream = io.BytesIO()
-            fig.savefig(image_stream, format="png", dpi=150, bbox_inches="tight")
+            fig.savefig(image_stream, format="png", dpi=ChartSettings.DPI, bbox_inches="tight")
             image_stream.seek(0)
             plt.close(fig)
 
@@ -569,6 +598,51 @@ class ReportGenerator:
 
         except Exception as e:
             logger.error(f"Failed to create chart '{chart_data.title}': {e}")
+            plt.close("all")
+            return None
+
+    def _create_radar_chart(self, chart_data: ChartData) -> Optional[io.BytesIO]:
+        """Create a radar chart for multi-dimensional comparison."""
+        try:
+            import numpy as np
+
+            labels = chart_data.x_labels
+            num_vars = len(labels)
+
+            # Compute angle for each axis
+            angles = np.linspace(0, 2 * np.pi, num_vars, endpoint=False).tolist()
+            angles += angles[:1]  # Complete the loop
+
+            fig, ax = plt.subplots(figsize=(self.chart_width, self.chart_height), subplot_kw=dict(polar=True))
+
+            colors = ChartSettings.COLORS
+
+            for i, dataset in enumerate(chart_data.datasets):
+                values = [float(v) if v is not None else 0 for v in dataset.get("data", [])]
+                values += values[:1]  # Complete the loop
+
+                ax.plot(angles, values, 'o-', linewidth=2,
+                        label=dataset.get("label", f"Series {i + 1}"),
+                        color=colors[i % len(colors)])
+                ax.fill(angles, values, alpha=0.25, color=colors[i % len(colors)])
+
+            ax.set_xticks(angles[:-1])
+            ax.set_xticklabels(labels, fontsize=9)
+            ax.set_title(chart_data.title, fontsize=12, fontweight="bold",
+                         color=Colors.PRIMARY, pad=20)
+            ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.0), fontsize=9)
+
+            plt.tight_layout()
+
+            image_stream = io.BytesIO()
+            fig.savefig(image_stream, format="png", dpi=ChartSettings.DPI, bbox_inches="tight")
+            image_stream.seek(0)
+            plt.close(fig)
+
+            return image_stream
+
+        except Exception as e:
+            logger.error(f"Failed to create radar chart '{chart_data.title}': {e}")
             plt.close("all")
             return None
 
@@ -590,18 +664,29 @@ class ReportGenerator:
         doc.add_page_break()
 
     def _create_trend_chart(self, trend: TrendData) -> Optional[io.BytesIO]:
-        """Create a trend line chart from TrendData."""
+        """Create a trend line chart from TrendData with professional styling."""
         try:
             fig, ax = plt.subplots(figsize=(self.chart_width, self.chart_height))
 
             years = [d.year for d in trend.data]
             values = [float(d.value) if d.value is not None else 0 for d in trend.data]
 
-            ax.plot(years, values, marker="o", linewidth=2, color="#4472C4")
+            ax.plot(years, values, marker="o", linewidth=2, color=Colors.PRIMARY,
+                    markersize=8, markerfacecolor=Colors.PRIMARY_LIGHT)
 
-            ax.set_title(f"{trend.metric_name}趋势", fontsize=12, fontweight="bold")
-            ax.set_xlabel("年份")
-            ax.set_ylabel(f"{trend.metric_name} ({trend.unit})")
+            # Add data labels
+            for year, val in zip(years, values):
+                ax.annotate(f'{val:,.0f}',
+                            xy=(year, val),
+                            xytext=(0, 8),
+                            textcoords="offset points",
+                            ha='center', va='bottom',
+                            fontsize=9)
+
+            ax.set_title(f"{trend.metric_name}趋势", fontsize=12, fontweight="bold",
+                         color=Colors.PRIMARY)
+            ax.set_xlabel("年份", fontsize=10)
+            ax.set_ylabel(f"{trend.metric_name} ({trend.unit})", fontsize=10)
             ax.grid(True, alpha=0.3)
 
             # Format y-axis with thousand separators
@@ -609,9 +694,9 @@ class ReportGenerator:
 
             plt.tight_layout()
 
-            # Save to BytesIO
+            # Save to BytesIO with high DPI
             image_stream = io.BytesIO()
-            fig.savefig(image_stream, format="png", dpi=150, bbox_inches="tight")
+            fig.savefig(image_stream, format="png", dpi=ChartSettings.DPI, bbox_inches="tight")
             image_stream.seek(0)
             plt.close(fig)
 
@@ -623,7 +708,7 @@ class ReportGenerator:
             return None
 
     def _add_peer_comparison(self, doc: Document, peer: PeerComparisonSection) -> None:
-        """Add peer comparison analysis section."""
+        """Add peer comparison analysis section with professional styling."""
         doc.add_heading("五、同业对比分析", level=1)
 
         # Peer companies list
@@ -636,10 +721,9 @@ class ReportGenerator:
             header_cells[0].text = "公司代码"
             header_cells[1].text = "公司名称"
             header_cells[2].text = "所属行业"
-            for cell in header_cells:
-                for para in cell.paragraphs:
-                    for run in para.runs:
-                        run.font.bold = True
+
+            # Apply professional header style
+            set_table_header_style(table)
 
             for company in peer.peer_companies:
                 row = table.add_row().cells
@@ -647,25 +731,76 @@ class ReportGenerator:
                 row[1].text = company.company_name
                 row[2].text = company.industry_name
 
+            # Apply alternating row colors
+            set_table_alternating_rows(table)
+
             doc.add_paragraph()
 
-        # Comparison metrics
+        # Comparison metrics with enhanced styling
         if peer.comparison_metrics:
             doc.add_heading("5.2 对比指标", level=2)
             self._add_metrics_table(doc, peer.comparison_metrics)
 
+            # Add radar chart for peer comparison if we have metrics
+            if len(peer.comparison_metrics) >= 3:
+                self._add_peer_radar_chart(doc, peer)
+
         # Analysis text
         if peer.analysis_text:
             doc.add_heading("5.3 分析结论", level=2)
-            doc.add_paragraph(peer.analysis_text)
+            # Split analysis into paragraphs if it contains newlines
+            paragraphs = peer.analysis_text.split('\n\n')
+            for para_text in paragraphs:
+                if para_text.strip():
+                    doc.add_paragraph(para_text.strip())
 
-        # Industry ranking
+        # Industry ranking with visual indicator
         if peer.ranking_in_industry:
             rank_para = doc.add_paragraph()
             rank_para.add_run("行业排名: ").bold = True
-            rank_para.add_run(f"第{peer.ranking_in_industry}名")
+            rank_run = rank_para.add_run(f"第{peer.ranking_in_industry}名")
+            # Color code based on ranking
+            if peer.ranking_in_industry <= 3:
+                rank_run.font.color.rgb = Colors.SUCCESS
+            elif peer.ranking_in_industry <= 10:
+                rank_run.font.color.rgb = Colors.WARNING
+            else:
+                rank_run.font.color.rgb = Colors.DANGER
 
         doc.add_page_break()
+
+    def _add_peer_radar_chart(self, doc: Document, peer: PeerComparisonSection) -> None:
+        """Add radar chart for peer comparison metrics."""
+        # Create radar chart data from comparison metrics
+        labels = []
+        target_values = []
+        industry_values = []
+
+        for metric in peer.comparison_metrics[:8]:  # Limit to 8 metrics for readability
+            if metric.value is not None:
+                labels.append(metric.name[:6])  # Truncate long names
+                # Normalize to percentage of industry average
+                if metric.industry_avg and metric.industry_avg != 0:
+                    target_values.append(float(metric.value) / float(metric.industry_avg) * 100)
+                else:
+                    target_values.append(100)
+                industry_values.append(100)  # Industry average is baseline
+
+        if len(labels) >= 3:
+            radar_data = ChartData(
+                chart_type="radar",
+                title="核心指标对比雷达图",
+                x_labels=labels,
+                datasets=[
+                    {"label": "目标企业", "data": target_values},
+                    {"label": "行业平均", "data": industry_values},
+                ]
+            )
+
+            chart_image = self._create_radar_chart(radar_data)
+            if chart_image:
+                doc.add_picture(chart_image, width=Inches(self.chart_width))
+                doc.add_paragraph()
 
     def _add_risk_assessment(self, doc: Document, risk: RiskAssessmentSection) -> None:
         """Add risk assessment section."""

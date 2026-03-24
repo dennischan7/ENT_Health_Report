@@ -9,7 +9,7 @@ import os
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
 from fastapi.responses import FileResponse, StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel, Field
 
 from app.db.session import get_db
@@ -194,7 +194,7 @@ def list_reports(
 
     支持按企业ID、报告类型、状态筛选。
     """
-    query = db.query(GeneratedReport)
+    query = db.query(GeneratedReport).options(joinedload(GeneratedReport.enterprise))
 
     # Apply filters
     if enterprise_id:
@@ -216,8 +216,35 @@ def list_reports(
     offset = (page - 1) * page_size
     items = query.offset(offset).limit(page_size).all()
 
+    # Build response with enterprise info
+    response_items = []
+    for item in items:
+        item_dict = {
+            "id": item.id,
+            "enterprise_id": item.enterprise_id,
+            "enterprise_code": item.enterprise.company_code if item.enterprise else None,
+            "enterprise_name": item.enterprise.company_name if item.enterprise else None,
+            "task_id": item.task_id,
+            "report_type": item.report_type,
+            "report_title": item.report_title,
+            "report_years": item.report_years,
+            "file_path": item.file_path,
+            "file_size": item.file_size,
+            "status": item.status,
+            "progress": None,  # Will be fetched from Redis if needed
+            "error_message": item.error_message,
+            "generated_by": item.generated_by,
+            "generation_time_seconds": item.generation_time_seconds,
+            "llm_model_used": item.llm_model_used,
+            "tokens_used": item.tokens_used,
+            "created_at": item.created_at,
+            "updated_at": item.updated_at,
+            "completed_at": item.completed_at,
+        }
+        response_items.append(GeneratedReportResponse(**item_dict))
+
     return GeneratedReportListResponse(
-        items=[GeneratedReportResponse.model_validate(item) for item in items],
+        items=response_items,
         total=total,
         page=page,
         page_size=page_size,

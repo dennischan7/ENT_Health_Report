@@ -16,11 +16,14 @@ class AIProvider(str, enum.Enum):
 
     OPENAI = "openai"
     DEEPSEEK = "deepseek"
-    QWEN = "qwen"
-    KIMI = "kimi"
+    ANTHROPIC = "anthropic"
+    QWEN = "qwen"  # 阿里千问
+    KIMI = "kimi"  # Moonshot
+    GLM = "glm"  # 智谱
+    BAIDU = "baidu"
+    TENCENT = "tencent"
     MINIMAX = "minimax"
     GEMINI = "gemini"
-    GLM = "glm"
     OPENAI_COMPATIBLE = "openai-compatible"
 
 

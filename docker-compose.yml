@@ -68,16 +68,11 @@ services:
   frontend-kimi:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.simple
     container_name: ent-health-frontend-kimi
     restart: unless-stopped
     ports:
       - "3005:3000"
-    environment:
-      - VITE_API_URL=http://localhost:8005
-    volumes:
-      - ./frontend/src:/app/src:ro
-      - ./frontend/public:/app/public:ro
     depends_on:
       - backend-kimi
     networks:

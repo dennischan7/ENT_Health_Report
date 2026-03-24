@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Card,
   Table,
@@ -22,6 +22,7 @@ import {
   ThunderboltOutlined,
   ReloadOutlined,
   StopOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import apiClient from '@/lib/api'
@@ -38,14 +39,29 @@ interface EnterpriseSearchResult {
 }
 
 // Report task with enterprise name (from API)
-interface ReportTaskWithEnterprise extends ReportTask {
-  // Additional fields from list API
+interface ReportTaskWithEnterprise {
+  id: number
+  task_id: string
+  enterprise_id: number
+  enterprise_code?: string
+  enterprise_name?: string
+  report_type: string
+  report_title: string
+  status: string
+  progress?: number
+  error_message?: string
+  file_path?: string
+  file_size?: number
+  created_at: string
+  updated_at: string
+  completed_at?: string
 }
 
 // Task status configuration
 const STATUS_CONFIG: Record<string, { color: string; text: string }> = {
   pending: { color: 'default', text: '等待中' },
-  processing: { color: 'processing', text: '生成中' },
+  generating: { color: 'processing', text: '生成中' },
+  processing: { color: 'processing', text: '处理中' },
   completed: { color: 'success', text: '已完成' },
   failed: { color: 'error', text: '失败' },
 }
@@ -77,6 +93,10 @@ function AIAnalysisPage() {
     pending: 0,
     failed: 0,
   })
+
+  // Selected rows for batch operations
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
+  const [deleting, setDeleting] = useState(false)
 
   // Search enterprises
   const searchEnterprises = async (query: string) => {
@@ -211,7 +231,7 @@ function AIAnalysisPage() {
     try {
       const createData: ReportTaskCreate = {
         enterprise_id: selectedEnterpriseId,
-        report_type: 'health_diagnosis',
+        report_type: 'peer_comparison',  // 使用同行对比报告类型
       }
       const response = await apiClient.post<{ task_id: string; status: string; message: string }>('/api/reports/generate', createData)
       const { task_id } = response.data
@@ -259,6 +279,55 @@ function AIAnalysisPage() {
     }
   }
 
+  // Delete single report
+  const handleDeleteReport = async (record: ReportTaskWithEnterprise) => {
+    if (!record.task_id) {
+      message.error('任务ID不存在')
+      return
+    }
+    try {
+      await apiClient.delete(`/api/reports/${record.task_id}`)
+      message.success('删除成功')
+      fetchReportHistory()
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || '删除失败')
+    }
+  }
+
+  // Batch delete reports
+  const handleBatchDelete = async () => {
+    if (selectedRowKeys.length === 0) {
+      message.warning('请选择要删除的报告')
+      return
+    }
+
+    setDeleting(true)
+    try {
+      // Get task_ids from selected rows
+      const selectedReports = reportHistory.filter(r => selectedRowKeys.includes(r.id))
+      const taskIds = selectedReports.map(r => r.task_id).filter(Boolean)
+
+      // Delete each report
+      const results = await Promise.allSettled(
+        taskIds.map(taskId => apiClient.delete(`/api/reports/${taskId}`))
+      )
+
+      const failed = results.filter(r => r.status === 'rejected')
+      if (failed.length > 0) {
+        message.warning(`删除完成，${failed.length}条失败`)
+      } else {
+        message.success(`成功删除 ${taskIds.length} 条记录`)
+      }
+
+      setSelectedRowKeys([])
+      fetchReportHistory()
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || '批量删除失败')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   // Get status tag
   const getStatusTag = (status: string) => {
     const config = STATUS_CONFIG[status] || STATUS_CONFIG.pending
@@ -295,6 +364,10 @@ function AIAnalysisPage() {
       render: (type) => {
         const typeMap: Record<string, string> = {
           health_diagnosis: '健康诊断报告',
+          full_diagnosis: '完整诊断报告',
+          peer_comparison: '同行对比报告',
+          financial_analysis: '财务分析报告',
+          risk_assessment: '风险评估报告',
         }
         return typeMap[type] || type
       },
@@ -338,7 +411,7 @@ function AIAnalysisPage() {
     {
       title: '操作',
       key: 'action',
-      width: 100,
+      width: 140,
       render: (_, record) => (
         <Space>
           {record.status === 'completed' && (
@@ -351,6 +424,21 @@ function AIAnalysisPage() {
               下载
             </Button>
           )}
+          <Popconfirm
+            title="确定删除此报告？"
+            onConfirm={() => handleDeleteReport(record)}
+            okText="确定"
+            cancelText="取消"
+          >
+            <Button
+              type="link"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+            >
+              删除
+            </Button>
+          </Popconfirm>
           {record.status === 'failed' && (
             <Text type="secondary" style={{ fontSize: 12 }}>
               {record.error_message || '生成失败'}
@@ -360,6 +448,14 @@ function AIAnalysisPage() {
       ),
     },
   ]
+
+  // Row selection config
+  const rowSelection = {
+    selectedRowKeys,
+    onChange: (newSelectedRowKeys: React.Key[]) => {
+      setSelectedRowKeys(newSelectedRowKeys)
+    },
+  }
 
   return (
     <div>
@@ -507,12 +603,45 @@ function AIAnalysisPage() {
 
       {/* Report History Card */}
       <Card title="报告历史">
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Space>
+            {selectedRowKeys.length > 0 && (
+              <>
+                <Text>已选择 {selectedRowKeys.length} 条</Text>
+                <Popconfirm
+                  title={`确定删除选中的 ${selectedRowKeys.length} 条报告？`}
+                  onConfirm={handleBatchDelete}
+                  okText="确定"
+                  cancelText="取消"
+                >
+                  <Button
+                    danger
+                    icon={<DeleteOutlined />}
+                    loading={deleting}
+                  >
+                    批量删除
+                  </Button>
+                </Popconfirm>
+                <Button onClick={() => setSelectedRowKeys([])}>
+                  取消选择
+                </Button>
+              </>
+            )}
+          </Space>
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={fetchReportHistory}
+          >
+            刷新
+          </Button>
+        </div>
         <Table
           columns={columns}
           dataSource={reportHistory}
           rowKey="id"
           loading={historyLoading}
           size="small"
+          rowSelection={rowSelection}
           pagination={{
             current: page,
             pageSize,

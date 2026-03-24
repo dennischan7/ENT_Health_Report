@@ -12,14 +12,17 @@ from pydantic import BaseModel, Field
 class AIProvider(str, Enum):
     """Supported AI providers."""
 
-    DEEPSEEK = "deepseek"
     OPENAI = "openai"
+    DEEPSEEK = "deepseek"
     ANTHROPIC = "anthropic"
-    MOONSHOT = "moonshot"
-    ZHIPU = "zhipu"
+    QWEN = "qwen"  # 阿里千问
+    KIMI = "kimi"  # Moonshot
+    GLM = "glm"  # 智谱
     BAIDU = "baidu"
-    ALIBABA = "alibaba"
     TENCENT = "tencent"
+    MINIMAX = "minimax"
+    GEMINI = "gemini"
+    OPENAI_COMPATIBLE = "openai-compatible"
 
 
 class AIConfigBase(BaseModel):

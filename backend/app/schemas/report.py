@@ -164,6 +164,8 @@ class GeneratedReportResponse(BaseModel):
 
     id: int
     enterprise_id: int
+    enterprise_code: Optional[str] = Field(None, description="企业代码")
+    enterprise_name: Optional[str] = Field(None, description="企业名称")
     task_id: Optional[str] = Field(None, description="任务ID")
     report_type: ReportType
     report_title: str
@@ -171,6 +173,7 @@ class GeneratedReportResponse(BaseModel):
     file_path: Optional[str]
     file_size: Optional[int]
     status: ReportStatus
+    progress: Optional[int] = Field(None, description="进度百分比")
     error_message: Optional[str]
     generated_by: Optional[int]
     generation_time_seconds: Optional[float]
@@ -178,6 +181,7 @@ class GeneratedReportResponse(BaseModel):
     tokens_used: Optional[int]
     created_at: datetime
     updated_at: datetime
+    completed_at: Optional[datetime] = Field(None, description="完成时间")
 
     model_config = {"from_attributes": True}
 

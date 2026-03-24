@@ -1,0 +1,18 @@
+# Simple production Dockerfile - use pre-built dist directory
+# Run 'npm run build' locally before building this image
+
+FROM nginx:alpine
+
+# Copy pre-built files
+COPY dist /usr/share/nginx/html
+
+# Copy nginx configuration
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Create directory for nginx cache
+RUN mkdir -p /var/cache/nginx && \
+    chown -R nginx:nginx /var/cache/nginx
+
+EXPOSE 3000
+
+CMD ["nginx", "-g", "daemon off;"]

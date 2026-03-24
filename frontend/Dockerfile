@@ -1,5 +1,5 @@
 # Build stage
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 
 # Install dependencies
-RUN npm install
+RUN npm install --registry=https://registry.npmmirror.com
 
 # Copy source code
 COPY . .
@@ -23,6 +23,10 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 
 # Copy nginx configuration
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Create directory for nginx cache
+RUN mkdir -p /var/cache/nginx && \
+    chown -R nginx:nginx /var/cache/nginx
 
 EXPOSE 3000
 

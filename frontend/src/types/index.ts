@@ -306,6 +306,7 @@ export interface ReportTask {
   report_type: string
   report_title: string
   status: ReportStatus
+  progress?: number
   error_message?: string
   file_path?: string
   file_size?: number

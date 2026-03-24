@@ -21,12 +21,14 @@ from app.services.task_manager import TaskManager, TaskStatus
 from app.services.agents.peer_comparison_agent import (
     PeerComparisonAgent,
     ComparisonReport,
+    PeerComparisonResult,
 )
 from app.services.report_generator import ReportGenerator
 from app.schemas.report import (
     ReportData,
     FinancialMetric,
     TrendData,
+    YearlyMetric,
     ChartData,
     ExecutiveSummary,
     FinancialMetricsSection,
@@ -193,21 +195,33 @@ class ReportTaskService:
             if not enterprise:
                 raise ValueError(f"Enterprise {enterprise_id} not found")
 
-            # Create initial report record
-            report_years = f"{year}" if year else f"{date.today().year - 2}-{date.today().year}"
-            report = GeneratedReport(
-                enterprise_id=enterprise_id,
-                generated_by=user_id,
-                task_id=task_id,
-                report_type=ReportType.FULL_DIAGNOSIS,
-                report_title=f"{enterprise.company_name} 健康度诊断报告",
-                report_years=report_years,
-                status=ReportStatus.GENERATING,
-                started_at=datetime.utcnow(),
-            )
-            db.add(report)
-            db.commit()
-            db.refresh(report)
+            # Find existing report record (created by API endpoint)
+            report = db.query(GeneratedReport).filter(
+                GeneratedReport.task_id == task_id
+            ).first()
+
+            # If no existing record, create one
+            if not report:
+                report_years = f"{year}" if year else f"{date.today().year - 2}-{date.today().year}"
+                report = GeneratedReport(
+                    enterprise_id=enterprise_id,
+                    generated_by=user_id,
+                    task_id=task_id,
+                    report_type=ReportType.FULL_DIAGNOSIS,
+                    report_title=f"{enterprise.company_name} 健康度诊断报告",
+                    report_years=report_years,
+                    status=ReportStatus.GENERATING,
+                    started_at=datetime.utcnow(),
+                )
+                db.add(report)
+                db.commit()
+                db.refresh(report)
+            else:
+                # Update existing record
+                report.status = ReportStatus.GENERATING
+                report.started_at = datetime.utcnow()
+                db.commit()
+                db.refresh(report)
 
             # Define progress callback
             def progress_callback(progress: int, message: str) -> None:
@@ -222,7 +236,7 @@ class ReportTaskService:
 
             peer_agent = PeerComparisonAgent(db)
             # The new LangGraph agent uses synchronous run() method
-            peer_report = peer_agent.run(
+            peer_result = peer_agent.run(
                 enterprise_id=enterprise_id,
                 years=3,
             )
@@ -232,7 +246,7 @@ class ReportTaskService:
 
             report_data = self._build_report_data_from_comparison(
                 enterprise=enterprise,
-                peer_report=peer_report,
+                peer_result=peer_result,
                 year=year,
             )
 
@@ -254,7 +268,7 @@ class ReportTaskService:
             report.file_path = doc_path
             report.file_size = file_size
             # Use peer_count as a proxy for health score (simplified for new agent)
-            report.health_score = Decimal(str(min(peer_report.peer_count * 10, 100)))
+            report.health_score = Decimal(str(min(peer_result.report.peer_count * 10, 100)))
             report.dimension_scores = {
                 "profitability": 75.0,  # Default values - can be enhanced
                 "solvency": 70.0,
@@ -262,11 +276,11 @@ class ReportTaskService:
                 "operational_efficiency": 70.0,
             }
             report.peer_comparison = {
-                "peer_count": peer_report.peer_count,
-                "industry_name": peer_report.industry_name,
+                "peer_count": peer_result.report.peer_count,
+                "industry_name": peer_result.report.industry_name,
             }
-            report.summary = peer_report.executive_summary
-            report.findings = self._generate_findings_from_report(peer_report)
+            report.summary = peer_result.report.executive_summary
+            report.findings = self._generate_findings_from_report(peer_result.report)
             report.completed_at = datetime.utcnow()
 
             db.commit()
@@ -330,69 +344,60 @@ class ReportTaskService:
     def _build_report_data_from_comparison(
         self,
         enterprise: Enterprise,
-        peer_report: ComparisonReport,
+        peer_result: PeerComparisonResult,
         year: Optional[int] = None,
     ) -> ReportData:
         """
-        Build ReportData schema from ComparisonReport (new LangGraph agent output).
+        Build ReportData schema from PeerComparisonResult.
 
         Args:
             enterprise: The enterprise being analyzed.
-            peer_report: ComparisonReport from the new LangGraph-based agent.
+            peer_result: Complete result from peer comparison agent.
             year: The fiscal year for analysis.
 
         Returns:
             ReportData schema ready for DOCX generation.
         """
+        peer_report = peer_result.report
+
         # Build executive summary from LLM-generated report
         executive_summary = ExecutiveSummary(
-            overall_rating="良",  # Default rating - can be derived from analysis
-            overall_score=Decimal("70.0"),  # Default score
+            overall_rating="良",
+            overall_score=Decimal("70.0"),
             summary_text=peer_report.executive_summary,
-            key_strengths=[s.item for s in peer_report.strengths[:2]],
-            key_risks=[w.item for w in peer_report.weaknesses[:2]],
+            key_strengths=[s.item for s in peer_report.strengths[:3]],
+            key_risks=[w.item for w in peer_report.weaknesses[:3]],
             recommendation=peer_report.recommendations[0]
             if peer_report.recommendations
             else "建议进一步分析企业状况。",
         )
 
-        # Build financial metrics (placeholder - would need actual metrics from agent)
-        financial_metrics = FinancialMetricsSection(
-            profitability=[
-                FinancialMetric(
-                    name="净资产收益率(ROE)",
-                    value=Decimal("0"),
-                    unit="%",
-                    change_rate=None,
-                    industry_avg=None,
-                    industry_rank=None,
-                ),
-            ],
-            solvency=[],
-            operation=[],
-            growth=[],
-        )
+        # Build financial metrics from comparison_metrics
+        financial_metrics = self._build_financial_metrics(peer_result.comparison_metrics)
 
-        # Build peer comparison from LLM report
-        peer_comparison = PeerComparisonSection(
-            peer_companies=[],  # Would need peer details
-            comparison_metrics=[],
-            analysis_text=f"本企业与{peer_report.peer_count}家同行业企业进行了对比分析。",
-            ranking_in_industry=0,
-        )
+        # Build peer comparison with actual data
+        peer_comparison = self._build_peer_comparison(peer_result)
+
+        # Build trends from target_financials
+        trends = self._build_trends(peer_result.target_financials)
+
+        # Build bar charts from comparison_metrics
+        bar_charts = self._build_comparison_charts(peer_result.comparison_metrics)
 
         # Build risk assessment from LLM report
         risk_level = "低" if not peer_report.risk_indicators else "中"
         risk_assessment = RiskAssessmentSection(
             overall_risk_level=risk_level,
-            financial_risk=peer_report.financial_position_analysis[:100]
+            financial_risk=peer_report.financial_position_analysis[:500]
             if peer_report.financial_position_analysis
-            else "",
-            operational_risk=peer_report.profitability_analysis[:100]
+            else "暂无详细分析",
+            operational_risk=peer_report.profitability_analysis[:500]
             if peer_report.profitability_analysis
+            else "暂无详细分析",
+            market_risk=peer_report.growth_analysis[:300]
+            if peer_report.growth_analysis
             else "",
-            market_risk="",
-            risk_warnings=peer_report.risk_indicators,
+            risk_warnings=peer_report.risk_indicators[:5],
         )
 
         # Build recommendations from LLM report
@@ -401,8 +406,10 @@ class ReportTaskService:
             financial_recommendations=peer_report.recommendations[2:4]
             if len(peer_report.recommendations) > 2
             else [],
-            operational_recommendations=[],
-            action_items=peer_report.risk_indicators[:3],
+            operational_recommendations=peer_report.recommendations[4:6]
+            if len(peer_report.recommendations) > 4
+            else [],
+            action_items=[w.item for w in peer_report.weaknesses[:3]],
         )
 
         # Build report data
@@ -418,13 +425,200 @@ class ReportTaskService:
             report_date=date.today(),
             executive_summary=executive_summary,
             financial_metrics=financial_metrics,
-            bar_charts=[],
+            bar_charts=bar_charts,
             line_charts=[],
-            trends=[],
+            trends=trends,
             peer_comparison=peer_comparison,
             risk_assessment=risk_assessment,
             recommendations=recommendations,
         )
+
+    def _build_financial_metrics(
+        self, comparison_metrics: List[Dict[str, Any]]
+    ) -> FinancialMetricsSection:
+        """Build financial metrics section from comparison metrics."""
+        profitability = []
+        solvency = []
+        operation = []
+        growth = []
+
+        # Map metrics to categories
+        metric_categories = {
+            "营业收入": ("profitability", "元"),
+            "净利润": ("profitability", "元"),
+            "总资产": ("solvency", "元"),
+            "所有者权益": ("solvency", "元"),
+            "负债合计": ("solvency", "元"),
+            "营业利润": ("profitability", "元"),
+            "基本每股收益": ("profitability", "元/股"),
+        }
+
+        for metric in comparison_metrics:
+            name = metric.get("name", "")
+            category_info = metric_categories.get(name)
+
+            if not category_info:
+                continue
+
+            category, unit = category_info
+
+            fin_metric = FinancialMetric(
+                name=name,
+                value=Decimal(str(metric.get("target_value", 0)))
+                if metric.get("target_value") else None,
+                unit=metric.get("unit", unit),
+                change_rate=None,
+                industry_avg=Decimal(str(metric.get("peer_average", 0)))
+                if metric.get("peer_average") else None,
+                industry_rank=metric.get("target_rank"),
+            )
+
+            if category == "profitability":
+                profitability.append(fin_metric)
+            elif category == "solvency":
+                solvency.append(fin_metric)
+            elif category == "operation":
+                operation.append(fin_metric)
+            elif category == "growth":
+                growth.append(fin_metric)
+
+        return FinancialMetricsSection(
+            profitability=profitability,
+            solvency=solvency,
+            operation=operation,
+            growth=growth,
+        )
+
+    def _build_peer_comparison(
+        self, peer_result: PeerComparisonResult
+    ) -> PeerComparisonSection:
+        """Build peer comparison section from agent result."""
+        # Build peer companies list
+        peer_companies = []
+        for peer in peer_result.peer_enterprises[:10]:
+            peer_companies.append(
+                PeerCompany(
+                    company_code=peer.get("company_code", ""),
+                    company_name=peer.get("company_name", ""),
+                    industry_name=peer.get("industry_name", ""),
+                )
+            )
+
+        # Build comparison metrics for report
+        comparison_metrics = []
+        for metric in peer_result.comparison_metrics:
+            comparison_metrics.append(
+                FinancialMetric(
+                    name=metric.get("name", ""),
+                    value=Decimal(str(metric.get("target_value", 0)))
+                    if metric.get("target_value") else None,
+                    unit=metric.get("unit", "元"),
+                    change_rate=None,
+                    industry_avg=Decimal(str(metric.get("peer_average", 0)))
+                    if metric.get("peer_average") else None,
+                    industry_rank=metric.get("target_rank"),
+                )
+            )
+
+        # Get ranking from first metric if available
+        ranking = None
+        if peer_result.comparison_metrics:
+            ranking = peer_result.comparison_metrics[0].get("target_rank")
+
+        # Build analysis text from LLM report
+        peer_report = peer_result.report
+        analysis_parts = []
+        if peer_report.financial_position_analysis:
+            analysis_parts.append(f"**财务状况**: {peer_report.financial_position_analysis}")
+        if peer_report.profitability_analysis:
+            analysis_parts.append(f"**盈利能力**: {peer_report.profitability_analysis}")
+        if peer_report.growth_analysis:
+            analysis_parts.append(f"**成长性**: {peer_report.growth_analysis}")
+
+        analysis_text = "\n\n".join(analysis_parts) if analysis_parts else f"本企业与{peer_report.peer_count}家同行业企业进行了对比分析。"
+
+        return PeerComparisonSection(
+            peer_companies=peer_companies,
+            comparison_metrics=comparison_metrics,
+            analysis_text=analysis_text,
+            ranking_in_industry=ranking,
+        )
+
+    def _build_trends(
+        self, target_financials: List[Dict[str, Any]]
+    ) -> List[TrendData]:
+        """Build trend data from target financials."""
+        trends = []
+
+        if not target_financials:
+            return trends
+
+        # Build revenue trend
+        revenue_data = []
+        profit_data = []
+        assets_data = []
+
+        for year_data in sorted(target_financials, key=lambda x: x.get("year", 0)):
+            year = year_data.get("year")
+            income = year_data.get("income_statement") or {}
+            balance = year_data.get("balance_sheet") or {}
+
+            if income.get("operating_revenue"):
+                revenue_data.append(
+                    YearlyMetric(year=year, value=Decimal(str(income["operating_revenue"])))
+                )
+            if income.get("net_profit"):
+                profit_data.append(
+                    YearlyMetric(year=year, value=Decimal(str(income["net_profit"])))
+                )
+            if balance.get("total_assets"):
+                assets_data.append(
+                    YearlyMetric(year=year, value=Decimal(str(balance["total_assets"])))
+                )
+
+        if revenue_data:
+            trends.append(TrendData(metric_name="营业收入", unit="元", data=revenue_data))
+        if profit_data:
+            trends.append(TrendData(metric_name="净利润", unit="元", data=profit_data))
+        if assets_data:
+            trends.append(TrendData(metric_name="总资产", unit="元", data=assets_data))
+
+        return trends
+
+    def _build_comparison_charts(
+        self, comparison_metrics: List[Dict[str, Any]]
+    ) -> List[ChartData]:
+        """Build comparison bar charts from metrics."""
+        charts = []
+
+        if not comparison_metrics:
+            return charts
+
+        # Build a grouped bar chart for key metrics
+        labels = []
+        target_values = []
+        avg_values = []
+
+        for metric in comparison_metrics[:7]:  # Limit to 7 metrics
+            name = metric.get("name", "")[:6]  # Truncate long names
+            labels.append(name)
+            target_values.append(metric.get("target_value") or 0)
+            avg_values.append(metric.get("peer_average") or 0)
+
+        if labels:
+            charts.append(
+                ChartData(
+                    chart_type="bar",
+                    title="关键指标与行业平均对比",
+                    x_labels=labels,
+                    datasets=[
+                        {"label": "目标企业", "data": target_values},
+                        {"label": "行业平均", "data": avg_values},
+                    ],
+                )
+            )
+
+        return charts
 
     def _generate_findings_from_report(
         self,

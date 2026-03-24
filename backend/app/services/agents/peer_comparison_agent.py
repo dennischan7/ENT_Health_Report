@@ -99,17 +99,19 @@ class ComparisonReport(BaseModel):
     )
 
     # Financial Position Analysis
-    financial_position_analysis: str = Field(
-        description="Analysis of financial position (资产, 负债, 所有者权益)"
+    financial_position_analysis: Optional[str] = Field(
+        default=None, description="Analysis of financial position (资产, 负债, 所有者权益)"
     )
 
     # Profitability Analysis
-    profitability_analysis: str = Field(
-        description="Analysis of profitability (营业收入, 净利润, 每股收益)"
+    profitability_analysis: Optional[str] = Field(
+        default=None, description="Analysis of profitability (营业收入, 净利润, 每股收益)"
     )
 
     # Growth Analysis
-    growth_analysis: str = Field(description="Analysis of 3-year growth trends")
+    growth_analysis: Optional[str] = Field(
+        default=None, description="Analysis of 3-year growth trends"
+    )
 
     # Recommendations
     recommendations: List[str] = Field(
@@ -119,6 +121,27 @@ class ComparisonReport(BaseModel):
     # Risk Indicators
     risk_indicators: List[str] = Field(
         default_factory=list, description="Potential risk indicators identified"
+    )
+
+
+class PeerComparisonResult(BaseModel):
+    """Complete result from peer comparison agent including all computed data."""
+
+    # LLM-generated report
+    report: ComparisonReport = Field(description="LLM-generated analysis report")
+
+    # Computed data for report generation
+    peer_enterprises: List[Dict[str, Any]] = Field(
+        default_factory=list, description="List of peer enterprises"
+    )
+    comparison_metrics: List[Dict[str, Any]] = Field(
+        default_factory=list, description="Comparison metrics data"
+    )
+    target_financials: List[Dict[str, Any]] = Field(
+        default_factory=list, description="Target enterprise 3-year financials"
+    )
+    target_enterprise: Optional[Dict[str, Any]] = Field(
+        default=None, description="Target enterprise info"
     )
 
 
@@ -207,7 +230,7 @@ class PeerComparisonAgent:
 
         return workflow.compile()
 
-    def run(self, enterprise_id: int, years: int = 3) -> ComparisonReport:
+    def run(self, enterprise_id: int, years: int = 3) -> PeerComparisonResult:
         """
         Execute the peer comparison analysis workflow.
 
@@ -216,7 +239,7 @@ class PeerComparisonAgent:
             years: Number of years to analyze (default: 3)
 
         Returns:
-            ComparisonReport: Structured analysis report
+            PeerComparisonResult: Complete result with report and computed data
 
         Raises:
             ValueError: If enterprise not found
@@ -242,7 +265,14 @@ class PeerComparisonAgent:
         if not final_state.get("report"):
             raise LLMError("Failed to generate comparison report")
 
-        return final_state["report"]
+        # Return complete result with all computed data
+        return PeerComparisonResult(
+            report=final_state["report"],
+            peer_enterprises=final_state.get("peer_enterprises", []),
+            comparison_metrics=final_state.get("comparison_metrics", []),
+            target_financials=final_state.get("target_financials", []),
+            target_enterprise=final_state.get("target_enterprise"),
+        )
 
     # =========================================================================
     # Workflow Nodes
@@ -656,23 +686,59 @@ class PeerComparisonAgent:
 
     def _build_system_prompt(self) -> str:
         """Build the system prompt for LLM analysis."""
-        return """你是一位专业的财务分析师，专长于企业同业对比分析。
+        return """你是一位资深的企业财务分析师，专长于上市公司同业对比分析和投资价值评估。
 
-你的任务是分析目标企业与同行业企业的财务数据对比，生成结构化的分析报告。
+你的任务是分析目标企业与同行业企业的财务数据对比，生成专业、深入的分析报告。
 
-分析要点：
-1. 财务状况分析：资产、负债、所有者权益的结构与趋势
-2. 盈利能力分析：营业收入、净利润、每股收益的对比
-3. 成长性分析：3年财务数据的变化趋势
-4. 风险识别：潜在财务风险点
-5. 战略建议：基于对比分析的建议
+## 分析框架要求
 
-注意事项：
-- 所有分析必须基于提供的数据，不要编造数据
+### 1. 财务状况分析（至少3个维度）
+- 资产结构：总资产、净资产、负债规模及变化趋势
+- 资产质量：资产负债率、流动比率、速动比率
+- 权益结构：所有者权益占比、留存收益情况
+
+### 2. 盈利能力分析（至少3个维度）
+- 收入规模：营业收入及增长率
+- 利润水平：净利润、毛利率、净利率
+- 股东回报：ROE、ROA、每股收益
+
+### 3. 成长性分析（基于3年数据）
+- 收入增长趋势及驱动因素
+- 利润增长趋势及可持续性
+- 资产扩张节奏
+
+### 4. 竞争优劣势分析（SWOT框架）
+- 优势（Strengths）：相对同业的领先指标
+- 劣势（Weaknesses）：落后于同业的指标
+- 机会（Opportunities）：行业趋势带来的机遇
+- 威胁（Threats）：潜在的竞争风险
+
+## 输出质量要求
+
+1. **数据支撑**：每个分析点必须引用具体数据
+   - 正确示例："营业收入123.45亿元，同比增长12.3%，高于行业平均8.5%的增速"
+   - 错误示例："营业收入表现良好"
+
+2. **逻辑链条**：结论必须有推理过程
+   - 正确示例："资产负债率65%，高于行业平均55%，主要由于近两年大规模扩产投资，需关注偿债压力"
+   - 错误示例："资产负债率较高"
+
+3. **对比视角**：始终与同业进行对比
+   - 排名位置（如"营业收入排名第3/11"）
+   - 与平均水平的偏离程度
+   - 与行业龙头差距
+
+4. **风险识别**：指出具体的财务风险点
+   - 流动性风险指标
+   - 盈利能力下降信号
+   - 资产质量预警
+
+## 输出格式要求
+
 - 使用专业但易懂的语言
-- 指出具体的优势和劣势
-- 提供可操作的建议
-- 同业对比企业数量不超过10家"""
+- 每个分析维度单独成段
+- 关键数据和结论用数据标注
+- 建议具有可操作性"""
 
     def _build_user_prompt(self, context: Dict[str, Any]) -> str:
         """Build the user prompt with context data."""
@@ -680,59 +746,106 @@ class PeerComparisonAgent:
         peers = context["peers"]
         metrics = context["comparison_metrics"]
 
-        # Format metrics
-        metrics_text = "## 关键指标对比\n\n"
+        # Format metrics with ranking context
+        metrics_text = "## 关键指标对比分析\n\n"
+        metrics_text += "| 指标 | 目标企业 | 行业平均 | 行业中位 | 排名 | 评价 |\n"
+        metrics_text += "|------|----------|----------|----------|------|------|\n"
+
         for m in metrics:
-            metrics_text += f"### {m['name']}\n"
-            target_val = m["target_value"]
-            peer_avg = m["peer_average"]
-            peer_med = m["peer_median"]
-            target_rank = m["target_rank"]
-            total_peers = m["total_peers"]
+            target_val = f"{m['target_value']:,.2f}" if m['target_value'] is not None else "N/A"
+            avg_val = f"{m['peer_average']:,.2f}" if m['peer_average'] is not None else "N/A"
+            med_val = f"{m['peer_median']:,.2f}" if m['peer_median'] is not None else "N/A"
 
-            target_str = f"{target_val:,.2f}" if target_val is not None else "N/A"
-            avg_str = f"{peer_avg:,.2f}" if peer_avg is not None else "N/A"
-            med_str = f"{peer_med:,.2f}" if peer_med is not None else "N/A"
-            rank_str = f"{target_rank}/{total_peers + 1}" if target_rank else "N/A"
+            # Calculate position
+            total = m['total_peers'] + 1
+            rank_str = f"{m['target_rank']}/{total}" if m['target_rank'] else "N/A"
 
-            metrics_text += f"- 目标企业: {target_str} {m['unit']}\n"
-            metrics_text += f"- 同业平均: {avg_str} {m['unit']}\n"
-            metrics_text += f"- 同业中位: {med_str} {m['unit']}\n"
-            metrics_text += f"- 排名: {rank_str}\n\n"
+            # Performance indicator
+            if m['target_value'] and m['peer_average']:
+                diff_pct = (m['target_value'] / m['peer_average'] - 1) * 100
+                if diff_pct > 20:
+                    indicator = "显著领先"
+                elif diff_pct > 0:
+                    indicator = "略高于平均"
+                elif diff_pct > -20:
+                    indicator = "略低于平均"
+                else:
+                    indicator = "明显落后"
+            else:
+                indicator = "-"
 
-        # Format target 3-year data
-        target_3yr_text = "## 目标企业近3年财务数据\n\n"
-        for fin in target["financials_3yr"]:
-            target_3yr_text += f"### {fin['year']}年\n"
-            rev = fin.get("operating_revenue")
-            profit = fin.get("net_profit")
-            assets = fin.get("total_assets")
-            equity = fin.get("total_equity")
+            metrics_text += f"| {m['name']} | {target_val} {m['unit']} | {avg_val} {m['unit']} | {med_val} {m['unit']} | {rank_str} | {indicator} |\n"
 
-            rev_str = f"{rev:,.2f}" if rev is not None else "N/A"
-            profit_str = f"{profit:,.2f}" if profit is not None else "N/A"
-            assets_str = f"{assets:,.2f}" if assets is not None else "N/A"
-            equity_str = f"{equity:,.2f}" if equity is not None else "N/A"
+        # Format target 3-year data with growth rates
+        target_3yr_text = "## 目标企业近3年财务数据及变化趋势\n\n"
 
-            target_3yr_text += f"- 营业收入: {rev_str} 元\n"
-            target_3yr_text += f"- 净利润: {profit_str} 元\n"
-            target_3yr_text += f"- 总资产: {assets_str} 元\n"
-            target_3yr_text += f"- 所有者权益: {equity_str} 元\n\n"
+        financials = target["financials_3yr"]
+        if len(financials) >= 2:
+            target_3yr_text += "| 年份 | 营业收入 | 同比增长 | 净利润 | 同比增长 | 总资产 | 所有者权益 |\n"
+            target_3yr_text += "|------|----------|----------|--------|----------|--------|------------|\n"
 
-        # Format peer summaries
-        peers_text = f"## 同业对比企业 ({len(peers)}家)\n\n"
+            prev_rev = None
+            prev_profit = None
+
+            for fin in financials:
+                rev = fin.get("operating_revenue")
+                profit = fin.get("net_profit")
+                assets = fin.get("total_assets")
+                equity = fin.get("total_equity")
+
+                rev_str = f"{rev:,.0f}" if rev else "N/A"
+                profit_str = f"{profit:,.0f}" if profit else "N/A"
+                assets_str = f"{assets:,.0f}" if assets else "N/A"
+                equity_str = f"{equity:,.0f}" if equity else "N/A"
+
+                # Calculate growth rates
+                rev_growth = f"{(rev/prev_rev-1)*100:+.1f}%" if rev and prev_rev else "-"
+                profit_growth = f"{(profit/prev_profit-1)*100:+.1f}%" if profit and prev_profit else "-"
+
+                target_3yr_text += f"| {fin['year']} | {rev_str} | {rev_growth} | {profit_str} | {profit_growth} | {assets_str} | {equity_str} |\n"
+
+                prev_rev = rev
+                prev_profit = profit
+        else:
+            for fin in financials:
+                target_3yr_text += f"### {fin['year']}年\n"
+                rev = fin.get("operating_revenue")
+                profit = fin.get("net_profit")
+                assets = fin.get("total_assets")
+                equity = fin.get("total_equity")
+
+                rev_str = f"{rev:,.2f}" if rev is not None else "N/A"
+                profit_str = f"{profit:,.2f}" if profit is not None else "N/A"
+                assets_str = f"{assets:,.2f}" if assets is not None else "N/A"
+                equity_str = f"{equity:,.2f}" if equity is not None else "N/A"
+
+                target_3yr_text += f"- 营业收入: {rev_str} 元\n"
+                target_3yr_text += f"- 净利润: {profit_str} 元\n"
+                target_3yr_text += f"- 总资产: {assets_str} 元\n"
+                target_3yr_text += f"- 所有者权益: {equity_str} 元\n\n"
+
+        # Format peer summaries with ranking
+        peers_text = f"## 同业对比企业详情 ({len(peers)}家)\n\n"
+        peers_text += "| 排名 | 公司名称 | 股票代码 | 最新营业收入 | 净利润 |\n"
+        peers_text += "|------|----------|----------|--------------|--------|\n"
+
         for i, peer in enumerate(peers, 1):
-            peers_text += f"{i}. {peer['company_name']} ({peer['company_code']})\n"
             peer_rev = peer.get("operating_revenue")
-            peer_rev_str = f"{peer_rev:,.2f}" if peer_rev is not None else "N/A"
-            peers_text += f"   最新营业收入: {peer_rev_str} 元\n\n"
+            peer_rev_str = f"{peer_rev:,.0f}" if peer_rev is not None else "N/A"
 
-        prompt = f"""请分析以下企业与同行业企业的财务对比情况：
+            # Get latest profit from financials
+            latest_fin = peer.get("financials_3yr", [])[-1] if peer.get("financials_3yr") else {}
+            peer_profit = latest_fin.get("net_profit")
+            peer_profit_str = f"{peer_profit:,.0f}" if peer_profit is not None else "N/A"
+
+            peers_text += f"| {i} | {peer['company_name']} | {peer['company_code']} | {peer_rev_str} | {peer_profit_str} |\n"
+
+        prompt = f"""请对以下企业进行深入的同业对比分析：
 
 # 目标企业
 - 名称: {target["company_name"]}
 - 股票代码: {target["company_code"]}
-- 行业: {target["industry_name"]}
+- 所属行业: {target["industry_name"]}
 
 {target_3yr_text}
 
@@ -740,6 +853,6 @@ class PeerComparisonAgent:
 
 {metrics_text}
 
-请生成详细的同业对比分析报告。"""
+请按照分析框架要求，生成专业深入的同业对比分析报告。每个分析点必须引用具体数据，结论必须有逻辑支撑。"""
 
         return prompt

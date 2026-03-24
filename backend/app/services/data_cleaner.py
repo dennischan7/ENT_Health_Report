@@ -49,7 +49,7 @@ INCOME_STATEMENT_MAPPING: Dict[str, str] = {
     "利润总额": "total_profit",
     "所得税费用": "income_tax_expense",
     "净利润": "net_profit",
-    "归属于母公司股东的净利润": "net_profit_parent",
+    "归属于母公司所有者的净利润": "net_profit_parent",
     "基本每股收益": "basic_eps",
 }
 
@@ -97,20 +97,26 @@ BALANCE_SHEET_THS_MAPPING: Dict[str, str] = {
 }
 
 # Column mapping from Tonghuashun Chinese names to database fields for income statement
+# THS返回的列名带有前缀，如"其中：营业收入"、"一、营业总收入"等
 INCOME_STATEMENT_THS_MAPPING: Dict[str, str] = {
     "报告期": "report_date",
-    "营业总收入": "total_revenue",
-    "营业收入": "operating_revenue",
-    "营业成本": "operating_cost",
+    "一、营业总收入": "total_revenue",
+    "*营业总收入": "total_revenue",
+    "其中：营业收入": "operating_revenue",
+    "其中：营业成本": "operating_cost",
     "销售费用": "selling_expenses",
     "管理费用": "administrative_expenses",
     "研发费用": "rd_expenses",
     "财务费用": "financial_expenses",
     "营业利润": "operating_profit",
+    "*营业利润": "operating_profit",
     "利润总额": "total_profit",
+    "*利润总额": "total_profit",
     "所得税费用": "income_tax_expense",
+    "*净利润": "net_profit",
     "净利润": "net_profit",
-    "归属于母公司股东的净利润": "net_profit_parent",
+    "归属于母公司所有者的净利润": "net_profit_parent",
+    "*归属于母公司所有者的净利润": "net_profit_parent",
     "基本每股收益": "basic_eps",
 }
 
@@ -468,7 +474,20 @@ def parse_chinese_number(value) -> Optional[float]:
         >>> parse_chinese_number("-")
         None
     """
-    if pd.isna(value) or value == "-" or value == "":
+    # Handle pandas Series or array - should not happen but be safe
+    if isinstance(value, (pd.Series, list, tuple)):
+        if len(value) == 1:
+            value = value[0]
+        else:
+            return None
+
+    try:
+        if pd.isna(value):
+            return None
+    except (ValueError, TypeError):
+        pass
+
+    if value == "-" or value == "" or value is None:
         return None
     if isinstance(value, (int, float)):
         return float(value)

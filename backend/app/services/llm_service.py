@@ -93,11 +93,14 @@ class LLMClient:
     PROVIDER_MAPPING: Dict[AIProvider, str] = {
         AIProvider.OPENAI: "openai",
         AIProvider.DEEPSEEK: "openai",  # DeepSeek uses OpenAI-compatible API
+        AIProvider.ANTHROPIC: "anthropic",
         AIProvider.QWEN: "openai",  # Qwen uses OpenAI-compatible API
         AIProvider.KIMI: "openai",  # Kimi uses OpenAI-compatible API
+        AIProvider.GLM: "openai",  # GLM uses OpenAI-compatible API
+        AIProvider.BAIDU: "openai",  # Baidu uses OpenAI-compatible API
+        AIProvider.TENCENT: "openai",  # Tencent uses OpenAI-compatible API
         AIProvider.MINIMAX: "openai",  # MiniMax uses OpenAI-compatible API
         AIProvider.GEMINI: "google_genai",
-        AIProvider.GLM: "openai",  # GLM uses OpenAI-compatible API
         AIProvider.OPENAI_COMPATIBLE: "openai",
     }
 
@@ -106,8 +109,10 @@ class LLMClient:
         AIProvider.DEEPSEEK: "https://api.deepseek.com/v1",
         AIProvider.QWEN: "https://dashscope.aliyuncs.com/compatible-mode/v1",
         AIProvider.KIMI: "https://api.moonshot.cn/v1",
-        AIProvider.MINIMAX: "https://api.minimax.chat/v1",
         AIProvider.GLM: "https://open.bigmodel.cn/api/paas/v4",
+        AIProvider.BAIDU: "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop",
+        AIProvider.TENCENT: "https://api.hunyuan.cloud.tencent.com/v1",
+        AIProvider.MINIMAX: "https://api.minimax.chat/v1",
     }
 
     def __init__(

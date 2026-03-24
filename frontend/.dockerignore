@@ -1,5 +1,4 @@
 node_modules/
-dist/
 .env
 .env.local
 .env.*.local
@@ -7,3 +6,9 @@ dist/
 npm-debug.log*
 .npm
 .pnpm-store/
+src/
+public/
+*.ts
+*.tsx
+*.json
+!package.json
