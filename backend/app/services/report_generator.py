@@ -70,8 +70,10 @@ from app.services.report_styles import (
 matplotlib.use("Agg")
 
 # Set Chinese font support for matplotlib
-plt.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "Arial Unicode MS"]
+# Use fonts that are installed in the Docker container
+plt.rcParams["font.sans-serif"] = ["WenQuanYi Zen Hei", "Noto Sans CJK SC", "Noto Sans CJK JP", "SimHei", "Microsoft YaHei", "DejaVu Sans"]
 plt.rcParams["axes.unicode_minus"] = False
+plt.rcParams["font.family"] = "sans-serif"
 
 logger = logging.getLogger(__name__)
 
@@ -489,7 +491,7 @@ class ReportGenerator:
         section_title: str,
         chart_type: str = "bar",
     ) -> None:
-        """Add a section with embedded charts."""
+        """Add a section with embedded charts and analysis text."""
         doc.add_heading("三、关键指标对比图表", level=1)
 
         for chart_data in charts_data:
@@ -502,7 +504,65 @@ class ReportGenerator:
                 doc.add_picture(chart_image, width=Inches(self.chart_width))
                 doc.add_paragraph()  # Spacing after chart
 
+            # Add analysis text for the chart
+            analysis_text = self._generate_chart_analysis(chart_data)
+            if analysis_text:
+                doc.add_paragraph(analysis_text)
+
         doc.add_page_break()
+
+    def _generate_chart_analysis(self, chart_data: ChartData) -> str:
+        """Generate analysis text for a chart based on its data."""
+        try:
+            datasets = chart_data.datasets
+            if not datasets or len(datasets) < 2:
+                return ""
+
+            target_data = datasets[0].get("data", [])
+            avg_data = datasets[1].get("data", [])
+            labels = chart_data.x_labels
+
+            if not target_data or not avg_data:
+                return ""
+
+            # Find metrics where target is significantly different from average
+            above_avg = []
+            below_avg = []
+            close_avg = []
+
+            for i, (label, target_val, avg_val) in enumerate(zip(labels, target_data, avg_data)):
+                if target_val is None or avg_val is None or avg_val == 0:
+                    continue
+
+                diff_pct = (target_val / avg_val - 1) * 100
+
+                if diff_pct > 20:
+                    above_avg.append((label, diff_pct))
+                elif diff_pct < -20:
+                    below_avg.append((label, diff_pct))
+                else:
+                    close_avg.append(label)
+
+            # Build analysis text
+            parts = []
+
+            if above_avg:
+                metrics_str = "、".join([f"{m}（高出{p:.1f}%）" for m, p in above_avg[:3]])
+                parts.append(f"**领先指标**：{metrics_str}等指标显著高于行业平均水平。")
+
+            if below_avg:
+                metrics_str = "、".join([f"{m}（低于{abs(p):.1f}%）" for m, p in below_avg[:3]])
+                parts.append(f"**落后指标**：{metrics_str}等指标明显低于行业平均，需重点关注和改进。")
+
+            if close_avg:
+                metrics_str = "、".join(close_avg[:3])
+                parts.append(f"**接近平均**：{metrics_str}等指标与行业平均水平接近，整体表现稳定。")
+
+            return " ".join(parts) if parts else ""
+
+        except Exception as e:
+            logger.warning(f"Failed to generate chart analysis: {e}")
+            return ""
 
     def _create_chart(self, chart_data: ChartData, chart_type: str = "bar") -> Optional[io.BytesIO]:
         """
@@ -579,7 +639,7 @@ class ReportGenerator:
                 # Radar chart for multi-dimensional comparison
                 return self._create_radar_chart(chart_data)
 
-            ax.set_title(chart_data.title, fontsize=12, fontweight="bold", color=Colors.PRIMARY)
+            ax.set_title(chart_data.title, fontsize=12, fontweight="bold", color=Colors.PRIMARY_HEX)
             ax.legend(loc="best", fontsize=9)
             ax.grid(True, alpha=0.3)
 
@@ -629,7 +689,7 @@ class ReportGenerator:
             ax.set_xticks(angles[:-1])
             ax.set_xticklabels(labels, fontsize=9)
             ax.set_title(chart_data.title, fontsize=12, fontweight="bold",
-                         color=Colors.PRIMARY, pad=20)
+                         color=Colors.PRIMARY_HEX, pad=20)
             ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.0), fontsize=9)
 
             plt.tight_layout()
@@ -647,21 +707,89 @@ class ReportGenerator:
             return None
 
     def _add_trend_charts(self, doc: Document, trends: List[TrendData]) -> None:
-        """Add trend line charts section."""
+        """Add trend line charts section with analysis text."""
         doc.add_heading("四、三年趋势分析", level=1)
 
         for trend in trends:
             if not trend.data:
                 continue
 
+            # Add chart title
+            doc.add_heading(trend.metric_name, level=2)
+
             # Create trend chart
             chart_image = self._create_trend_chart(trend)
             if chart_image:
-                doc.add_heading(trend.metric_name, level=2)
                 doc.add_picture(chart_image, width=Inches(self.chart_width))
                 doc.add_paragraph()
 
+            # Add analysis text for the trend
+            analysis_text = self._generate_trend_analysis(trend)
+            if analysis_text:
+                doc.add_paragraph(analysis_text)
+
         doc.add_page_break()
+
+    def _generate_trend_analysis(self, trend: TrendData) -> str:
+        """Generate analysis text for a trend chart."""
+        try:
+            data = trend.data
+            if len(data) < 2:
+                return f"{trend.metric_name}数据不足，无法进行趋势分析。"
+
+            # Calculate year-over-year changes
+            changes = []
+            for i in range(1, len(data)):
+                prev_val = float(data[i-1].value) if data[i-1].value else 0
+                curr_val = float(data[i].value) if data[i].value else 0
+
+                if prev_val != 0:
+                    change_pct = (curr_val / prev_val - 1) * 100
+                    changes.append((data[i].year, change_pct, curr_val, prev_val))
+
+            if not changes:
+                return ""
+
+            # Determine overall trend
+            positive_changes = [c for c in changes if c[1] > 0]
+            negative_changes = [c for c in changes if c[1] < 0]
+
+            latest_year, latest_change, latest_val, _ = changes[-1]
+            first_val = float(data[0].value) if data[0].value else 0
+            last_val = float(data[-1].value) if data[-1].value else 0
+
+            if first_val != 0:
+                total_change = (last_val / first_val - 1) * 100
+            else:
+                total_change = 0
+
+            # Build analysis text
+            parts = []
+
+            # Overall trend
+            if total_change > 10:
+                parts.append(f"**整体趋势**：{trend.metric_name}呈上升趋势，{data[0].year}年至{data[-1].year}年累计增长{total_change:.1f}%。")
+            elif total_change < -10:
+                parts.append(f"**整体趋势**：{trend.metric_name}呈下降趋势，{data[0].year}年至{data[-1].year}年累计下降{abs(total_change):.1f}%。")
+            else:
+                parts.append(f"**整体趋势**：{trend.metric_name}整体保持稳定，变动幅度在{abs(total_change):.1f}%以内。")
+
+            # Year-by-year analysis
+            if len(changes) > 0:
+                year_changes = []
+                for year, change_pct, curr_val, prev_val in changes:
+                    direction = "增长" if change_pct > 0 else "下降"
+                    year_changes.append(f"{year-1}至{year}年{direction}{abs(change_pct):.1f}%")
+                parts.append(f"**年度变化**：{'；'.join(year_changes)}。")
+
+            # Latest value
+            parts.append(f"**最新数据**：{data[-1].year}年{trend.metric_name}为{last_val:,.2f}{trend.unit}。")
+
+            return " ".join(parts)
+
+        except Exception as e:
+            logger.warning(f"Failed to generate trend analysis: {e}")
+            return ""
 
     def _create_trend_chart(self, trend: TrendData) -> Optional[io.BytesIO]:
         """Create a trend line chart from TrendData with professional styling."""
@@ -671,8 +799,8 @@ class ReportGenerator:
             years = [d.year for d in trend.data]
             values = [float(d.value) if d.value is not None else 0 for d in trend.data]
 
-            ax.plot(years, values, marker="o", linewidth=2, color=Colors.PRIMARY,
-                    markersize=8, markerfacecolor=Colors.PRIMARY_LIGHT)
+            ax.plot(years, values, marker="o", linewidth=2, color=Colors.PRIMARY_HEX,
+                    markersize=8, markerfacecolor=Colors.PRIMARY_LIGHT_HEX)
 
             # Add data labels
             for year, val in zip(years, values):
@@ -684,7 +812,7 @@ class ReportGenerator:
                             fontsize=9)
 
             ax.set_title(f"{trend.metric_name}趋势", fontsize=12, fontweight="bold",
-                         color=Colors.PRIMARY)
+                         color=Colors.PRIMARY_HEX)
             ax.set_xlabel("年份", fontsize=10)
             ax.set_ylabel(f"{trend.metric_name} ({trend.unit})", fontsize=10)
             ax.grid(True, alpha=0.3)

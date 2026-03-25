@@ -2,11 +2,16 @@ FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies and Chinese fonts
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
+    fonts-wqy-zenhei \
+    fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
+
+# Clear matplotlib font cache (will be rebuilt with new fonts)
+RUN rm -rf /root/.cache/matplotlib
 
 # Install Python dependencies with Chinese mirror
 COPY requirements.txt .

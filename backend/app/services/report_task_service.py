@@ -373,16 +373,22 @@ class ReportTaskService:
         )
 
         # Build financial metrics from comparison_metrics
+        logger.info(f"Building financial metrics from {len(peer_result.comparison_metrics)} comparison_metrics")
+        logger.debug(f"comparison_metrics sample: {peer_result.comparison_metrics[:2] if peer_result.comparison_metrics else 'empty'}")
         financial_metrics = self._build_financial_metrics(peer_result.comparison_metrics)
 
         # Build peer comparison with actual data
         peer_comparison = self._build_peer_comparison(peer_result)
 
         # Build trends from target_financials
+        logger.info(f"Building trends from {len(peer_result.target_financials)} target_financials")
+        logger.debug(f"target_financials sample: {peer_result.target_financials[:1] if peer_result.target_financials else 'empty'}")
         trends = self._build_trends(peer_result.target_financials)
+        logger.info(f"Built {len(trends)} trends")
 
         # Build bar charts from comparison_metrics
         bar_charts = self._build_comparison_charts(peer_result.comparison_metrics)
+        logger.info(f"Built {len(bar_charts)} bar_charts")
 
         # Build risk assessment from LLM report
         risk_level = "低" if not peer_report.risk_indicators else "中"
@@ -547,7 +553,7 @@ class ReportTaskService:
     def _build_trends(
         self, target_financials: List[Dict[str, Any]]
     ) -> List[TrendData]:
-        """Build trend data from target financials."""
+        """Build trend data from target financials (converted to 万元)."""
         trends = []
 
         if not target_financials:
@@ -563,25 +569,26 @@ class ReportTaskService:
             income = year_data.get("income_statement") or {}
             balance = year_data.get("balance_sheet") or {}
 
+            # Convert to 万元
             if income.get("operating_revenue"):
                 revenue_data.append(
-                    YearlyMetric(year=year, value=Decimal(str(income["operating_revenue"])))
+                    YearlyMetric(year=year, value=Decimal(str(income["operating_revenue"])) / 10000)
                 )
             if income.get("net_profit"):
                 profit_data.append(
-                    YearlyMetric(year=year, value=Decimal(str(income["net_profit"])))
+                    YearlyMetric(year=year, value=Decimal(str(income["net_profit"])) / 10000)
                 )
             if balance.get("total_assets"):
                 assets_data.append(
-                    YearlyMetric(year=year, value=Decimal(str(balance["total_assets"])))
+                    YearlyMetric(year=year, value=Decimal(str(balance["total_assets"])) / 10000)
                 )
 
         if revenue_data:
-            trends.append(TrendData(metric_name="营业收入", unit="元", data=revenue_data))
+            trends.append(TrendData(metric_name="营业收入", unit="万元", data=revenue_data))
         if profit_data:
-            trends.append(TrendData(metric_name="净利润", unit="元", data=profit_data))
+            trends.append(TrendData(metric_name="净利润", unit="万元", data=profit_data))
         if assets_data:
-            trends.append(TrendData(metric_name="总资产", unit="元", data=assets_data))
+            trends.append(TrendData(metric_name="总资产", unit="万元", data=assets_data))
 
         return trends
 

@@ -364,6 +364,26 @@ class PeerComparisonAgent:
 
         return state
 
+    def _get_latest_financial_year(self) -> int:
+        """
+        Query the latest financial data year from database.
+
+        Returns:
+            int: The latest year with financial data, or current year - 1 as fallback.
+        """
+        latest_income = (
+            self.db.query(IncomeStatement.report_year)
+            .order_by(desc(IncomeStatement.report_year))
+            .first()
+        )
+        if latest_income:
+            logger.info(f"Latest financial data year in database: {latest_income[0]}")
+            return latest_income[0]
+        # Fallback to current year - 1 if no data exists
+        fallback_year = date.today().year - 1
+        logger.warning(f"No financial data found, using fallback year: {fallback_year}")
+        return fallback_year
+
     def _fetch_peer_financials(self, state: PeerComparisonState) -> PeerComparisonState:
         """Fetch 3-year financial data for target and peers."""
         years = state["years"]
@@ -374,9 +394,9 @@ class PeerComparisonAgent:
             state["error"] = "No target enterprise found"
             return state
 
-        # Calculate year range
-        current_year = date.today().year
-        year_range = list(range(current_year - years + 1, current_year + 1))
+        # Calculate year range based on actual data availability
+        latest_year = self._get_latest_financial_year()
+        year_range = list(range(latest_year - years + 1, latest_year + 1))
 
         # Fetch target financials
         target_financials = self._fetch_enterprise_financials(target["id"], year_range)
@@ -390,6 +410,12 @@ class PeerComparisonAgent:
         state["peer_financials"] = peer_financials
 
         logger.info(f"Fetched financials for target and {len(peers)} peers ({years} years)")
+        logger.info(f"Year range: {year_range}")
+        logger.info(f"Target financials count: {len(target_financials)}")
+        for fin in target_financials:
+            has_income = fin.get("income_statement") is not None
+            has_balance = fin.get("balance_sheet") is not None
+            logger.info(f"  Year {fin.get('year')}: income_statement={has_income}, balance_sheet={has_balance}")
 
         return state
 
@@ -498,6 +524,7 @@ class PeerComparisonAgent:
                 peers=peers,
             )
             comparison_metrics.append(metric)
+            logger.debug(f"Metric {display_name}: target={metric.get('target_value')}, avg={metric.get('peer_average')}")
 
         state["comparison_metrics"] = comparison_metrics
 
@@ -551,14 +578,14 @@ class PeerComparisonAgent:
         return {
             "name": display_name,
             "field_name": field_name,
-            "target_value": target_value,
-            "peer_average": peer_average,
-            "peer_median": peer_median,
-            "peer_max": peer_max,
-            "peer_min": peer_min,
+            "target_value": target_value / 10000 if target_value else None,  # Convert to 万元
+            "peer_average": peer_average / 10000 if peer_average else None,  # Convert to 万元
+            "peer_median": peer_median / 10000 if peer_median else None,  # Convert to 万元
+            "peer_max": peer_max / 10000 if peer_max else None,  # Convert to 万元
+            "peer_min": peer_min / 10000 if peer_min else None,  # Convert to 万元
             "target_rank": target_rank,
             "total_peers": len(peers),
-            "unit": "元" if field_name != "basic_eps" else "元/股",
+            "unit": "万元" if field_name != "basic_eps" else "元/股",
         }
 
     def _generate_llm_analysis(self, state: PeerComparisonState) -> PeerComparisonState:
@@ -623,6 +650,10 @@ class PeerComparisonAgent:
         comparison_metrics: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """Prepare context data for LLM analysis."""
+        # Helper function to convert to 万元
+        def to_wan(value):
+            return value / 10000 if value else None
+
         # Build 3-year financial summary for target
         target_3yr = []
         for fin in sorted(target_financials, key=lambda x: x["year"]):
@@ -632,13 +663,13 @@ class PeerComparisonAgent:
             target_3yr.append(
                 {
                     "year": fin["year"],
-                    "operating_revenue": income.get("operating_revenue"),
-                    "net_profit": income.get("net_profit"),
-                    "total_assets": balance.get("total_assets"),
-                    "total_equity": balance.get("total_equity"),
-                    "total_liabilities": balance.get("total_liabilities"),
-                    "operating_profit": income.get("operating_profit"),
-                    "basic_eps": income.get("basic_eps"),
+                    "operating_revenue": to_wan(income.get("operating_revenue")),
+                    "net_profit": to_wan(income.get("net_profit")),
+                    "total_assets": to_wan(balance.get("total_assets")),
+                    "total_equity": to_wan(balance.get("total_equity")),
+                    "total_liabilities": to_wan(balance.get("total_liabilities")),
+                    "operating_profit": to_wan(income.get("operating_profit")),
+                    "basic_eps": income.get("basic_eps"),  # Keep as is (元/股)
                 }
             )
 
@@ -656,10 +687,10 @@ class PeerComparisonAgent:
                 peer_3yr.append(
                     {
                         "year": fin["year"],
-                        "operating_revenue": income.get("operating_revenue"),
-                        "net_profit": income.get("net_profit"),
-                        "total_assets": balance.get("total_assets"),
-                        "total_equity": balance.get("total_equity"),
+                        "operating_revenue": to_wan(income.get("operating_revenue")),
+                        "net_profit": to_wan(income.get("net_profit")),
+                        "total_assets": to_wan(balance.get("total_assets")),
+                        "total_equity": to_wan(balance.get("total_equity")),
                     }
                 )
 
@@ -667,7 +698,7 @@ class PeerComparisonAgent:
                 {
                     "company_code": peer["company_code"],
                     "company_name": peer["company_name"],
-                    "operating_revenue": peer.get("operating_revenue"),
+                    "operating_revenue": to_wan(peer.get("operating_revenue")),
                     "financials_3yr": peer_3yr,
                 }
             )
@@ -777,7 +808,7 @@ class PeerComparisonAgent:
             metrics_text += f"| {m['name']} | {target_val} {m['unit']} | {avg_val} {m['unit']} | {med_val} {m['unit']} | {rank_str} | {indicator} |\n"
 
         # Format target 3-year data with growth rates
-        target_3yr_text = "## 目标企业近3年财务数据及变化趋势\n\n"
+        target_3yr_text = "## 目标企业近3年财务数据及变化趋势（单位：万元）\n\n"
 
         financials = target["financials_3yr"]
         if len(financials) >= 2:
@@ -793,10 +824,10 @@ class PeerComparisonAgent:
                 assets = fin.get("total_assets")
                 equity = fin.get("total_equity")
 
-                rev_str = f"{rev:,.0f}" if rev else "N/A"
-                profit_str = f"{profit:,.0f}" if profit else "N/A"
-                assets_str = f"{assets:,.0f}" if assets else "N/A"
-                equity_str = f"{equity:,.0f}" if equity else "N/A"
+                rev_str = f"{rev:,.2f}" if rev else "N/A"
+                profit_str = f"{profit:,.2f}" if profit else "N/A"
+                assets_str = f"{assets:,.2f}" if assets else "N/A"
+                equity_str = f"{equity:,.2f}" if equity else "N/A"
 
                 # Calculate growth rates
                 rev_growth = f"{(rev/prev_rev-1)*100:+.1f}%" if rev and prev_rev else "-"
@@ -819,24 +850,24 @@ class PeerComparisonAgent:
                 assets_str = f"{assets:,.2f}" if assets is not None else "N/A"
                 equity_str = f"{equity:,.2f}" if equity is not None else "N/A"
 
-                target_3yr_text += f"- 营业收入: {rev_str} 元\n"
-                target_3yr_text += f"- 净利润: {profit_str} 元\n"
-                target_3yr_text += f"- 总资产: {assets_str} 元\n"
-                target_3yr_text += f"- 所有者权益: {equity_str} 元\n\n"
+                target_3yr_text += f"- 营业收入: {rev_str} 万元\n"
+                target_3yr_text += f"- 净利润: {profit_str} 万元\n"
+                target_3yr_text += f"- 总资产: {assets_str} 万元\n"
+                target_3yr_text += f"- 所有者权益: {equity_str} 万元\n\n"
 
         # Format peer summaries with ranking
-        peers_text = f"## 同业对比企业详情 ({len(peers)}家)\n\n"
+        peers_text = f"## 同业对比企业详情 ({len(peers)}家，单位：万元)\n\n"
         peers_text += "| 排名 | 公司名称 | 股票代码 | 最新营业收入 | 净利润 |\n"
         peers_text += "|------|----------|----------|--------------|--------|\n"
 
         for i, peer in enumerate(peers, 1):
             peer_rev = peer.get("operating_revenue")
-            peer_rev_str = f"{peer_rev:,.0f}" if peer_rev is not None else "N/A"
+            peer_rev_str = f"{peer_rev:,.2f}" if peer_rev is not None else "N/A"
 
             # Get latest profit from financials
             latest_fin = peer.get("financials_3yr", [])[-1] if peer.get("financials_3yr") else {}
             peer_profit = latest_fin.get("net_profit")
-            peer_profit_str = f"{peer_profit:,.0f}" if peer_profit is not None else "N/A"
+            peer_profit_str = f"{peer_profit:,.2f}" if peer_profit is not None else "N/A"
 
             peers_text += f"| {i} | {peer['company_name']} | {peer['company_code']} | {peer_rev_str} | {peer_profit_str} |\n"
 
